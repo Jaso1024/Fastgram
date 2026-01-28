@@ -15,6 +15,57 @@ def _die(msg: str) -> int:
     return 2
 
 
+def _use_color() -> bool:
+    return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def _c(s: str, code: str) -> str:
+    if not _use_color():
+        return s
+    return f"\x1b[{code}m{s}\x1b[0m"
+
+
+def _bold(s: str) -> str:
+    return _c(s, "1")
+
+
+def _dim(s: str) -> str:
+    return _c(s, "2")
+
+
+def _cyan(s: str) -> str:
+    return _c(s, "36")
+
+
+def _clear() -> None:
+    if sys.stdout.isatty():
+        sys.stdout.write("\x1b[2J\x1b[H")
+        sys.stdout.flush()
+
+
+def _term_width() -> int:
+    try:
+        return shutil.get_terminal_size(fallback=(100, 20)).columns
+    except Exception:
+        return 100
+
+
+def _hr() -> str:
+    return _dim("─" * max(10, _term_width()))
+
+
+def _prompt(s: str) -> str:
+    return input(_bold(s))
+
+
+def _yn(s: str, default: bool = False) -> bool:
+    suf = " [Y/n]: " if default else " [y/N]: "
+    v = _prompt(s + suf).strip().lower()
+    if not v:
+        return default
+    return v in ("y", "yes")
+
+
 def _resolve_index_spec(name_or_url: str) -> Tuple[str, str]:
     if name_or_url.startswith("s3://"):
         url = name_or_url
@@ -54,7 +105,7 @@ def _run_aws_sync(
         cmd.append("--only-show-errors")
     cmd.extend(extra_args)
     if dry_run:
-        print(" ".join(cmd))
+        print(shlex.join(cmd))
         return 0
     dest.mkdir(parents=True, exist_ok=True)
     subprocess.run(cmd, check=True)
@@ -62,8 +113,18 @@ def _run_aws_sync(
 
 
 def cmd_list(_args: argparse.Namespace) -> int:
-    for name, url in list_official_indices():
-        print(f"{name}\t{url}")
+    rows = list_official_indices()
+    if not sys.stdout.isatty():
+        for name, url in rows:
+            print(f"{name}\t{url}")
+        return 0
+
+    name_w = max((len(name) for name, _ in rows), default=4)
+    _clear()
+    print(_bold("gram") + " " + _dim("(official free indices)"))
+    print(_hr())
+    for name, url in rows:
+        print(f"{_cyan(name.ljust(name_w))}  {_dim(url)}")
     return 0
 
 
@@ -97,20 +158,29 @@ def _interactive_download(aws: str, base: Path) -> bool:
 
     flt = ""
     while True:
-        print()
-        print("Download:")
+        _clear()
+        print(_bold("Download indices") + " " + _dim("(infini-gram-lite, no-sign)"))
+        print(_dim(f"AWS: {aws}   Base: {base}"))
+        if flt:
+            print(_dim(f"Filter: {flt}"))
+        print(_hr())
         shown: List[Tuple[str, str]] = []
         for name, url in indices:
-            if flt and flt not in name:
+            if flt and flt.lower() not in name.lower():
                 continue
             shown.append((name, url))
         if not shown:
-            print("(no matches)")
+            print(_dim("(no matches)"))
         else:
+            name_w = max((len(n) for n, _ in shown), default=4)
+            num_w = len(str(len(shown)))
             for i, (name, url) in enumerate(shown, 1):
-                print(f"{i}\t{name}\t{url}")
+                n = str(i).rjust(num_w)
+                print(f"{_dim(n)}  {_cyan(name.ljust(name_w))}  {_dim(url)}")
 
-        s = input("select number, filter text, b, or q: ").strip()
+        print(_hr())
+        print(_dim("number=select  text=filter  enter=clear filter  b=back  q=quit"))
+        s = _prompt("download> ").strip()
         if s in ("q", "quit", "exit"):
             return True
         if s in ("b", "back"):
@@ -122,16 +192,22 @@ def _interactive_download(aws: str, base: Path) -> bool:
             ix = int(s) - 1
             if ix < 0 or ix >= len(shown):
                 print("invalid selection", file=sys.stderr)
+                _prompt("press enter: ")
                 continue
             name, url = shown[ix]
+            _clear()
+            print(_bold("Selected") + ": " + _cyan(name))
+            print(_dim(url))
+            print(_hr())
+            print(_dim("Press enter to accept defaults."))
 
             default_dest = base / name
-            dest_in = input(f"dest [{default_dest}]: ").strip()
+            dest_in = _prompt(f"destination [{default_dest}]: ").strip()
             dest = Path(dest_in) if dest_in else default_dest
 
-            delete = input("delete extra local files? [y/N]: ").strip().lower() in ("y", "yes")
-            quiet = input("quiet? [y/N]: ").strip().lower() in ("y", "yes")
-            extra = input("extra aws args (optional): ").strip()
+            delete = _yn("delete extra local files?", default=False)
+            quiet = _yn("quiet?", default=False)
+            extra = _prompt("extra aws args (optional): ").strip()
             extra_args = shlex.split(extra) if extra else []
 
             try:
@@ -146,9 +222,10 @@ def _interactive_download(aws: str, base: Path) -> bool:
                 )
             except FileNotFoundError as e:
                 print(f"missing dependency: {e}", file=sys.stderr)
+                _prompt("press enter: ")
                 continue
 
-            run = input("run download? [y/N]: ").strip().lower() in ("y", "yes")
+            run = _yn("run download?", default=False)
             if not run:
                 continue
             try:
@@ -163,10 +240,13 @@ def _interactive_download(aws: str, base: Path) -> bool:
                 )
             except FileNotFoundError as e:
                 print(f"missing dependency: {e}", file=sys.stderr)
+                _prompt("press enter: ")
                 continue
             except subprocess.CalledProcessError as e:
                 print(f"download failed: {e.returncode}", file=sys.stderr)
+                _prompt("press enter: ")
                 continue
+            _prompt("done; press enter: ")
             continue
 
         flt = s
@@ -180,11 +260,13 @@ def _interactive_main() -> int:
     base = Path(os.environ.get("GRAM_INDEX_DIR", "index"))
 
     while True:
-        print()
-        print("gram:")
-        print("1\tdownload")
-        print("q\tquit")
-        s = input("select: ").strip()
+        _clear()
+        print(_bold("gram"))
+        print(_hr())
+        print("1  " + _cyan("download") + "  " + _dim("download an official free index"))
+        print("q  " + _dim("quit"))
+        print(_hr())
+        s = _prompt("gram> ").strip()
         if s in ("q", "quit", "exit"):
             return 0
         if s in ("1", "d", "download"):
@@ -192,6 +274,7 @@ def _interactive_main() -> int:
                 return 0
             continue
         print("unknown command", file=sys.stderr)
+        _prompt("press enter: ")
 
 
 def main(argv: List[str] | None = None) -> int:
