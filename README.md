@@ -17,3 +17,9 @@ Tools:
 - `tg_rpc`: stdin/stdout RPC for benchmarking + integration
 - `tg_query`: quick CLI query helper
 - `tg_build_unigram_ranges`: build `unigram_ranges.bin` for faster unigram range lookup
+
+Python:
+
+`python -m pip install -e .`
+
+`python -c "from gram import GramEngine; print(GramEngine)"`
