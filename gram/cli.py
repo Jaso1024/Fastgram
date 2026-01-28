@@ -89,21 +89,16 @@ def cmd_download(args: argparse.Namespace, extra_aws_args: List[str]) -> int:
     )
 
 
-def _interactive() -> int:
-    if not sys.stdin.isatty() or not sys.stdout.isatty():
-        return _die("no command provided; run `gram list` or `gram download ...`")
-
+def _interactive_download(aws: str, base: Path) -> bool:
     indices = list_official_indices()
     if not indices:
-        return _die("no indices in catalog")
-
-    aws = os.environ.get("GRAM_AWS", "aws")
-    base = Path(os.environ.get("GRAM_INDEX_DIR", "index"))
+        print("no indices in catalog", file=sys.stderr)
+        return False
 
     flt = ""
     while True:
         print()
-        print("Indices:")
+        print("Download:")
         shown: List[Tuple[str, str]] = []
         for name, url in indices:
             if flt and flt not in name:
@@ -115,9 +110,11 @@ def _interactive() -> int:
             for i, (name, url) in enumerate(shown, 1):
                 print(f"{i}\t{name}\t{url}")
 
-        s = input("select number, filter text, or q: ").strip()
+        s = input("select number, filter text, b, or q: ").strip()
         if s in ("q", "quit", "exit"):
-            return 0
+            return True
+        if s in ("b", "back"):
+            return False
         if not s:
             flt = ""
             continue
@@ -175,11 +172,33 @@ def _interactive() -> int:
         flt = s
 
 
+def _interactive_main() -> int:
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        return _die("no command provided; run `gram list` or `gram download ...`")
+
+    aws = os.environ.get("GRAM_AWS", "aws")
+    base = Path(os.environ.get("GRAM_INDEX_DIR", "index"))
+
+    while True:
+        print()
+        print("gram:")
+        print("1\tdownload")
+        print("q\tquit")
+        s = input("select: ").strip()
+        if s in ("q", "quit", "exit"):
+            return 0
+        if s in ("1", "d", "download"):
+            if _interactive_download(aws=aws, base=base):
+                return 0
+            continue
+        print("unknown command", file=sys.stderr)
+
+
 def main(argv: List[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     if not argv:
-        return _interactive()
+        return _interactive_main()
 
     parser = argparse.ArgumentParser(prog="gram")
     sub = parser.add_subparsers(dest="cmd", required=True)
