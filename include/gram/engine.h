@@ -159,13 +159,13 @@ class Engine {
   FindResult FindWithHint(const std::vector<Token>& input_ids,
                           const std::vector<std::pair<u64, u64>>& hint_segment_by_shard) const;
   CountResult Count(const std::vector<Token>& input_ids) const;
-  ProbResult Prob(const std::vector<Token>& prompt_ids, Token cont_id) const;
-  DistResult<Token> Ntd(const std::vector<Token>& prompt_ids, u64 max_support) const;
+  ProbResult PrimitiveProb(const std::vector<Token>& prompt_ids, Token cont_id) const;
+  DistResult<Token> PrimitiveNtd(const std::vector<Token>& prompt_ids, u64 max_support) const;
   DistResult<Token> NtdFromSegment(std::size_t num_bytes,
                                    const std::vector<std::pair<u64, u64>>& segment_by_shard,
                                    u64 max_support) const;
-  InfgramProbResult InfgramProb(const std::vector<Token>& prompt_ids, Token cont_id) const;
-  InfgramDistResult<Token> InfgramNtd(const std::vector<Token>& prompt_ids, u64 max_support) const;
+  InfgramProbResult Prob(const std::vector<Token>& prompt_ids, Token cont_id) const;
+  InfgramDistResult<Token> Ntd(const std::vector<Token>& prompt_ids, u64 max_support) const;
 
   FindCnfResult FindCnf(const std::vector<std::vector<std::vector<Token>>>& cnf,
                         u64 max_clause_freq,

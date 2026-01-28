@@ -7,3 +7,9 @@ __pycache__/
 .DS_Store
 cmake-build-*/
 index/
+bench/build_inputs/
+bench/build_outputs/
+bench/build_refs/
+dist/
+*.whl
+*.tar.gz

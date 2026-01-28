@@ -144,10 +144,10 @@ int main() {
   const auto fr2 = engine.Find(q2);
   assert(fr2.cnt == naive2);
 
-  const auto pr = engine.Prob(q2, 40);
+  const auto pr = engine.PrimitiveProb(q2, 40);
   assert(pr.prompt_cnt == naive2);
 
-  const auto ntd = engine.Ntd(q2, 1000);
+  const auto ntd = engine.PrimitiveNtd(q2, 1000);
   const auto naive_ntd = NaiveNtdCounts(ds, doc_sep, eos, q2, 65535);
   std::uint64_t total = 0;
   for (const auto& [tok, res] : ntd.result_by_token_id) {

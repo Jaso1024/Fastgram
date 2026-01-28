@@ -1,6 +1,6 @@
 recursive-include include *.h
 recursive-include src *.cc
-recursive-include gram *.py *.cpp *.json py.typed
+recursive-include fastgram *.py *.cpp *.json py.typed
 include README.md
 include CMakeLists.txt
 include pyproject.toml

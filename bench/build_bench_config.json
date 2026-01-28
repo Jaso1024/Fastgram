@@ -1,0 +1,29 @@
+{
+  "ram_cap_bytes": 8589934592,
+  "token_width": 2,
+  "version": 4,
+  "dtype": "u16",
+  "eos": 50256,
+  "vocab": 50257,
+  "verify": true,
+  "verify_max_queries": 200,
+  "verify_queries": "bench/queries_v4_pileval_gpt2.txt",
+  "modes": [
+    "table_only",
+    "full"
+  ],
+  "inputs": [
+    {
+      "name": "slice_small",
+      "dir": "bench/build_inputs/v4_pileval_gpt2_small",
+      "ref_dir": "bench/build_refs/v4_pileval_gpt2_small"
+    },
+    {
+      "name": "slice_medium",
+      "dir": "bench/build_inputs/v4_pileval_gpt2_medium",
+      "ref_dir": "bench/build_refs/v4_pileval_gpt2_medium"
+    }
+  ],
+  "out_dir": "bench/build_outputs",
+  "runs": 3
+}

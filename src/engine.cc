@@ -536,7 +536,7 @@ CountResult Engine<Token>::Count(const std::vector<Token>& input_ids) const {
 }
 
 template <typename Token>
-ProbResult Engine<Token>::Prob(const std::vector<Token>& prompt_ids, Token cont_id) const {
+ProbResult Engine<Token>::PrimitiveProb(const std::vector<Token>& prompt_ids, Token cont_id) const {
   const auto prompt = Find(prompt_ids);
   if (prompt.cnt == 0) {
     return ProbResult{.prompt_cnt = 0, .cont_cnt = 0, .prob = -1.0};
@@ -553,7 +553,7 @@ ProbResult Engine<Token>::Prob(const std::vector<Token>& prompt_ids, Token cont_
 }
 
 template <typename Token>
-DistResult<Token> Engine<Token>::Ntd(const std::vector<Token>& prompt_ids, u64 max_support) const {
+DistResult<Token> Engine<Token>::PrimitiveNtd(const std::vector<Token>& prompt_ids, u64 max_support) const {
   auto fr = Find(prompt_ids);
   if (fr.cnt == 0) {
     return DistResult<Token>{.prompt_cnt = 0, .result_by_token_id = {}, .approx = false};
@@ -732,7 +732,7 @@ void Engine<Token>::GetFreqByTokenIdApprox(std::size_t s,
 }
 
 template <typename Token>
-InfgramProbResult Engine<Token>::InfgramProb(const std::vector<Token>& prompt_ids, Token cont_id) const {
+InfgramProbResult Engine<Token>::Prob(const std::vector<Token>& prompt_ids, Token cont_id) const {
   const std::size_t L = prompt_ids.size();
   std::size_t l_lo = 0;
   std::size_t l_hi = 1;
@@ -759,12 +759,12 @@ InfgramProbResult Engine<Token>::InfgramProb(const std::vector<Token>& prompt_id
   }
   const u64 suffix_len = static_cast<u64>(l_lo);
   std::vector<Token> suffix(prompt_ids.end() - static_cast<std::ptrdiff_t>(suffix_len), prompt_ids.end());
-  auto r = Prob(suffix, cont_id);
+  auto r = PrimitiveProb(suffix, cont_id);
   return InfgramProbResult{.prompt_cnt = r.prompt_cnt, .cont_cnt = r.cont_cnt, .prob = r.prob, .suffix_len = suffix_len};
 }
 
 template <typename Token>
-InfgramDistResult<Token> Engine<Token>::InfgramNtd(const std::vector<Token>& prompt_ids, u64 max_support) const {
+InfgramDistResult<Token> Engine<Token>::Ntd(const std::vector<Token>& prompt_ids, u64 max_support) const {
   const std::size_t L = prompt_ids.size();
   std::size_t l_lo = 0;
   std::size_t l_hi = 1;
@@ -791,7 +791,7 @@ InfgramDistResult<Token> Engine<Token>::InfgramNtd(const std::vector<Token>& pro
   }
   const u64 suffix_len = static_cast<u64>(l_lo);
   std::vector<Token> suffix(prompt_ids.end() - static_cast<std::ptrdiff_t>(suffix_len), prompt_ids.end());
-  auto r = Ntd(suffix, max_support);
+  auto r = PrimitiveNtd(suffix, max_support);
   return InfgramDistResult<Token>{
       .prompt_cnt = r.prompt_cnt,
       .result_by_token_id = r.result_by_token_id,

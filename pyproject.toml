@@ -1,11 +1,35 @@
 [project]
-name = "gram"
+name = "fast-gram"
 version = "0.1.0"
+description = "High-performance memory-mapped n-gram engine for large text corpora"
+readme = "README.md"
 requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "jaso1024", email = "jabohwho@gmail.com"}
+]
+keywords = ["ngram", "suffix-array", "nlp", "tokenization", "infingram"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: C++",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Linguistic",
+]
 dependencies = ["transformers>=4.0"]
 
+[project.urls]
+Homepage = "https://github.com/Jaso1024/Fastgram"
+Repository = "https://github.com/Jaso1024/Fastgram"
+Issues = "https://github.com/Jaso1024/Fastgram/issues"
+
 [project.scripts]
-gram = "gram.cli:main"
+gram = "fastgram.cli:main"
 
 [build-system]
 requires = ["setuptools>=42", "wheel", "pybind11"]

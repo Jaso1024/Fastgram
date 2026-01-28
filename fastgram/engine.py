@@ -114,22 +114,22 @@ class GramEngine:
         r = self.engine.count(input_ids=input_ids)
         return {"count": r.count, "approx": r.approx}
 
-    def prob(self, prompt_ids: QueryIdsType, cont_id: int) -> Union[ProbResponse, ErrorResponse]:
+    def primitive_prob(self, prompt_ids: QueryIdsType, cont_id: int) -> Union[ProbResponse, ErrorResponse]:
         if not self._check_ids(prompt_ids, allow_empty=True):
             return {"error": "prompt_ids must be a list[int]"}
         if not isinstance(cont_id, int) or cont_id < 0 or cont_id > self.token_id_max:
             return {"error": "cont_id out of range"}
-        r = self.engine.prob(prompt_ids=prompt_ids, cont_id=cont_id)
+        r = self.engine.primitive_prob(prompt_ids=prompt_ids, cont_id=cont_id)
         return {"prompt_cnt": r.prompt_cnt, "cont_cnt": r.cont_cnt, "prob": r.prob}
 
-    def ntd(self, prompt_ids: QueryIdsType, max_support: Optional[int] = None) -> Union[NtdResponse, ErrorResponse]:
+    def primitive_ntd(self, prompt_ids: QueryIdsType, max_support: Optional[int] = None) -> Union[NtdResponse, ErrorResponse]:
         if max_support is None:
             max_support = self.max_support
         if not isinstance(max_support, int) or max_support <= 0:
             return {"error": "max_support must be > 0"}
         if not self._check_ids(prompt_ids, allow_empty=True):
             return {"error": "prompt_ids must be a list[int]"}
-        r = self.engine.ntd(prompt_ids=prompt_ids, max_support=max_support)
+        r = self.engine.primitive_ntd(prompt_ids=prompt_ids, max_support=max_support)
         out = {int(tok): {"cont_cnt": int(v.cont_cnt), "prob": float(v.prob)} for tok, v in r.result_by_token_id.items()}
         return {"prompt_cnt": r.prompt_cnt, "result_by_token_id": out, "approx": r.approx}
 
@@ -163,22 +163,22 @@ class GramEngine:
             return r
         return {"count": r["cnt"], "approx": r["approx"]}
 
-    def infgram_prob(self, prompt_ids: QueryIdsType, cont_id: int) -> Union[InfGramProbResponse, ErrorResponse]:
+    def prob(self, prompt_ids: QueryIdsType, cont_id: int) -> Union[InfGramProbResponse, ErrorResponse]:
         if not self._check_ids(prompt_ids, allow_empty=True):
             return {"error": "prompt_ids must be a list[int]"}
         if not isinstance(cont_id, int) or cont_id < 0 or cont_id > self.token_id_max:
             return {"error": "cont_id out of range"}
-        r = self.engine.infgram_prob(prompt_ids=prompt_ids, cont_id=cont_id)
+        r = self.engine.prob(prompt_ids=prompt_ids, cont_id=cont_id)
         return {"prompt_cnt": r.prompt_cnt, "cont_cnt": r.cont_cnt, "prob": r.prob, "suffix_len": r.suffix_len}
 
-    def infgram_ntd(self, prompt_ids: QueryIdsType, max_support: Optional[int] = None) -> Union[InfGramNtdResponse, ErrorResponse]:
+    def ntd(self, prompt_ids: QueryIdsType, max_support: Optional[int] = None) -> Union[InfGramNtdResponse, ErrorResponse]:
         if max_support is None:
             max_support = self.max_support
         if not isinstance(max_support, int) or max_support <= 0:
             return {"error": "max_support must be > 0"}
         if not self._check_ids(prompt_ids, allow_empty=True):
             return {"error": "prompt_ids must be a list[int]"}
-        r = self.engine.infgram_ntd(prompt_ids=prompt_ids, max_support=max_support)
+        r = self.engine.ntd(prompt_ids=prompt_ids, max_support=max_support)
         out = {int(tok): {"cont_cnt": int(v.cont_cnt), "prob": float(v.prob)} for tok, v in r.result_by_token_id.items()}
         return {"prompt_cnt": r.prompt_cnt, "result_by_token_id": out, "approx": r.approx, "suffix_len": r.suffix_len}
 
@@ -292,4 +292,3 @@ class GramEngine:
                 }
             )
         return {"spans": spans}
-

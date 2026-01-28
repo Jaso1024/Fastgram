@@ -25,9 +25,9 @@ def _extra_link_args():
 
 ext_modules = [
     Extension(
-        "gram.cpp_engine",
+        "fastgram.cpp_engine",
         [
-            "gram/cpp_engine.cpp",
+            "fastgram/cpp_engine.cpp",
             "src/engine.cc",
             "src/mmap_file.cc",
             "src/thread_pool.cc",
@@ -41,10 +41,10 @@ ext_modules = [
 
 
 setup(
-    name="gram",
+    name="fast-gram",
     version="0.1.0",
-    packages=["gram"],
-    package_data={"gram": ["py.typed", "index_catalog.json"]},
+    packages=["fastgram"],
+    package_data={"fastgram": ["py.typed", "index_catalog.json"]},
     ext_modules=ext_modules,
     zip_safe=False,
     python_requires=">=3.11",

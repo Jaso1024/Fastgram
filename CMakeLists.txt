@@ -30,6 +30,12 @@ if(GRAM_BUILD_TOOLS)
 
   add_executable(tg_rpc tools/tg_rpc.cc)
   target_link_libraries(tg_rpc PRIVATE gram)
+
+  add_executable(tg_slice_index tools/tg_slice_index.cc)
+  target_compile_features(tg_slice_index PRIVATE cxx_std_20)
+
+  add_executable(tg_build_index tools/tg_build_index.cc)
+  target_compile_features(tg_build_index PRIVATE cxx_std_20)
 endif()
 
 if(GRAM_BUILD_TESTS)
@@ -44,4 +50,6 @@ if(GRAM_BUILD_BENCH)
   target_link_libraries(tg_bench_find PRIVATE gram)
   add_executable(tg_bench_ntd bench/tg_bench_ntd.cc)
   target_link_libraries(tg_bench_ntd PRIVATE gram)
+  add_executable(tg_bench_suite bench/tg_bench_suite.cc)
+  target_link_libraries(tg_bench_suite PRIVATE gram)
 endif()

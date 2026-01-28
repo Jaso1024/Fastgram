@@ -1,8 +1,8 @@
-__all__ = ["GramEngine"]
+__all__ = ["gram", "GramEngine"]
 
 
 def __getattr__(name: str):
-    if name == "GramEngine":
+    if name == "gram" or name == "GramEngine":
         from .engine import GramEngine
 
         return GramEngine

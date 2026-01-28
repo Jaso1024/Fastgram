@@ -1,0 +1,13 @@
+{
+  "warmup_runs": 20,
+  "runs": 50,
+  "iters": 1,
+  "index_dir": "index/v4_pileval_gpt2",
+  "dtype": "u16",
+  "eos": 50256,
+  "vocab": 50257,
+  "version": 4,
+  "max_support": 20,
+  "query_file": "bench/queries_v4_pileval_gpt2.txt",
+  "op": "ntd"
+}

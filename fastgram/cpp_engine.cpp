@@ -67,20 +67,22 @@ class PyEngine {
                               std::uint64_t max_diff_tokens) const {
     return engine_->CountCnf(cnf, max_clause_freq, max_diff_tokens);
   }
-  gram::ProbResult prob(const std::vector<Token>& prompt_ids, Token cont_id) const { return engine_->Prob(prompt_ids, cont_id); }
-  gram::DistResult<Token> ntd(const std::vector<Token>& prompt_ids, std::uint64_t max_support) const {
+  gram::ProbResult primitive_prob(const std::vector<Token>& prompt_ids, Token cont_id) const {
+    return engine_->PrimitiveProb(prompt_ids, cont_id);
+  }
+  gram::DistResult<Token> primitive_ntd(const std::vector<Token>& prompt_ids, std::uint64_t max_support) const {
+    return engine_->PrimitiveNtd(prompt_ids, max_support);
+  }
+  gram::InfgramProbResult prob(const std::vector<Token>& prompt_ids, Token cont_id) const {
+    return engine_->Prob(prompt_ids, cont_id);
+  }
+  gram::InfgramDistResult<Token> ntd(const std::vector<Token>& prompt_ids, std::uint64_t max_support) const {
     return engine_->Ntd(prompt_ids, max_support);
   }
   gram::DistResult<Token> ntd_from_segment(std::size_t num_bytes,
                                            const std::vector<std::pair<std::uint64_t, std::uint64_t>>& segment_by_shard,
                                            std::uint64_t max_support) const {
     return engine_->NtdFromSegment(num_bytes, segment_by_shard, max_support);
-  }
-  gram::InfgramProbResult infgram_prob(const std::vector<Token>& prompt_ids, Token cont_id) const {
-    return engine_->InfgramProb(prompt_ids, cont_id);
-  }
-  gram::InfgramDistResult<Token> infgram_ntd(const std::vector<Token>& prompt_ids, std::uint64_t max_support) const {
-    return engine_->InfgramNtd(prompt_ids, max_support);
   }
   gram::SearchDocsResult<Token> search_docs(const std::vector<Token>& input_ids, std::size_t maxnum, std::uint64_t max_disp_len) const {
     return engine_->SearchDocs(input_ids, maxnum, max_disp_len);
@@ -322,6 +324,16 @@ PYBIND11_MODULE(cpp_engine, m) {
            "cnf"_a,
            "max_clause_freq"_a,
            "max_diff_tokens"_a)
+      .def("primitive_prob",
+           &PyEngine<gram::u8>::primitive_prob,
+           py::call_guard<py::gil_scoped_release>(),
+           "prompt_ids"_a,
+           "cont_id"_a)
+      .def("primitive_ntd",
+           &PyEngine<gram::u8>::primitive_ntd,
+           py::call_guard<py::gil_scoped_release>(),
+           "prompt_ids"_a,
+           "max_support"_a)
       .def("prob", &PyEngine<gram::u8>::prob, py::call_guard<py::gil_scoped_release>(), "prompt_ids"_a, "cont_id"_a)
       .def("ntd", &PyEngine<gram::u8>::ntd, py::call_guard<py::gil_scoped_release>(), "prompt_ids"_a, "max_support"_a)
       .def("ntd_from_segment",
@@ -330,8 +342,6 @@ PYBIND11_MODULE(cpp_engine, m) {
            "num_bytes"_a,
            "segment_by_shard"_a,
            "max_support"_a)
-      .def("infgram_prob", &PyEngine<gram::u8>::infgram_prob, py::call_guard<py::gil_scoped_release>(), "prompt_ids"_a, "cont_id"_a)
-      .def("infgram_ntd", &PyEngine<gram::u8>::infgram_ntd, py::call_guard<py::gil_scoped_release>(), "prompt_ids"_a, "max_support"_a)
       .def("search_docs",
            &PyEngine<gram::u8>::search_docs,
            py::call_guard<py::gil_scoped_release>(),
@@ -421,6 +431,16 @@ PYBIND11_MODULE(cpp_engine, m) {
            "cnf"_a,
            "max_clause_freq"_a,
            "max_diff_tokens"_a)
+      .def("primitive_prob",
+           &PyEngine<gram::u16>::primitive_prob,
+           py::call_guard<py::gil_scoped_release>(),
+           "prompt_ids"_a,
+           "cont_id"_a)
+      .def("primitive_ntd",
+           &PyEngine<gram::u16>::primitive_ntd,
+           py::call_guard<py::gil_scoped_release>(),
+           "prompt_ids"_a,
+           "max_support"_a)
       .def("prob", &PyEngine<gram::u16>::prob, py::call_guard<py::gil_scoped_release>(), "prompt_ids"_a, "cont_id"_a)
       .def("ntd", &PyEngine<gram::u16>::ntd, py::call_guard<py::gil_scoped_release>(), "prompt_ids"_a, "max_support"_a)
       .def("ntd_from_segment",
@@ -429,8 +449,6 @@ PYBIND11_MODULE(cpp_engine, m) {
            "num_bytes"_a,
            "segment_by_shard"_a,
            "max_support"_a)
-      .def("infgram_prob", &PyEngine<gram::u16>::infgram_prob, py::call_guard<py::gil_scoped_release>(), "prompt_ids"_a, "cont_id"_a)
-      .def("infgram_ntd", &PyEngine<gram::u16>::infgram_ntd, py::call_guard<py::gil_scoped_release>(), "prompt_ids"_a, "max_support"_a)
       .def("search_docs",
            &PyEngine<gram::u16>::search_docs,
            py::call_guard<py::gil_scoped_release>(),
@@ -525,6 +543,16 @@ PYBIND11_MODULE(cpp_engine, m) {
            "cnf"_a,
            "max_clause_freq"_a,
            "max_diff_tokens"_a)
+      .def("primitive_prob",
+           &PyEngine<gram::u32>::primitive_prob,
+           py::call_guard<py::gil_scoped_release>(),
+           "prompt_ids"_a,
+           "cont_id"_a)
+      .def("primitive_ntd",
+           &PyEngine<gram::u32>::primitive_ntd,
+           py::call_guard<py::gil_scoped_release>(),
+           "prompt_ids"_a,
+           "max_support"_a)
       .def("prob", &PyEngine<gram::u32>::prob, py::call_guard<py::gil_scoped_release>(), "prompt_ids"_a, "cont_id"_a)
       .def("ntd", &PyEngine<gram::u32>::ntd, py::call_guard<py::gil_scoped_release>(), "prompt_ids"_a, "max_support"_a)
       .def("ntd_from_segment",
@@ -533,8 +561,6 @@ PYBIND11_MODULE(cpp_engine, m) {
            "num_bytes"_a,
            "segment_by_shard"_a,
            "max_support"_a)
-      .def("infgram_prob", &PyEngine<gram::u32>::infgram_prob, py::call_guard<py::gil_scoped_release>(), "prompt_ids"_a, "cont_id"_a)
-      .def("infgram_ntd", &PyEngine<gram::u32>::infgram_ntd, py::call_guard<py::gil_scoped_release>(), "prompt_ids"_a, "max_support"_a)
       .def("search_docs",
            &PyEngine<gram::u32>::search_docs,
            py::call_guard<py::gil_scoped_release>(),
@@ -592,4 +618,3 @@ PYBIND11_MODULE(cpp_engine, m) {
            "max_cnt"_a,
            "enforce_bow"_a);
 }
-
