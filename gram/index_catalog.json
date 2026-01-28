@@ -1,5 +1,33 @@
 {
-  "v4_dolmasample_olmo": "s3://infini-gram-lite/index/v4_dolmasample_olmo",
-  "v4_pileval_gpt2": "s3://infini-gram-lite/index/v4_pileval_gpt2",
-  "v4_pileval_llama": "s3://infini-gram-lite/index/v4_pileval_llama"
+  "v4_dolmasample_olmo": {
+    "s3_url": "s3://infini-gram-lite/index/v4_dolmasample_olmo",
+    "tokenizer": {
+      "hf_id": "allenai/OLMo-7B",
+      "use_fast": false,
+      "add_bos_token": false,
+      "add_eos_token": false
+    },
+    "version": 4
+  },
+  "v4_pileval_gpt2": {
+    "s3_url": "s3://infini-gram-lite/index/v4_pileval_gpt2",
+    "tokenizer": {
+      "hf_id": "gpt2",
+      "use_fast": false,
+      "add_bos_token": false,
+      "add_eos_token": false
+    },
+    "version": 4
+  },
+  "v4_pileval_llama": {
+    "s3_url": "s3://infini-gram-lite/index/v4_pileval_llama",
+    "tokenizer": {
+      "hf_id": "meta-llama/Llama-2-7b-hf",
+      "use_fast": false,
+      "add_bos_token": false,
+      "add_eos_token": false,
+      "requires_hf_token": true
+    },
+    "version": 4
+  }
 }

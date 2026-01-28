@@ -33,3 +33,26 @@ Requires AWS CLI (`aws`).
 `gram list`
 
 `gram download v4_pileval_gpt2 --to index/v4_pileval_gpt2`
+
+Run:
+
+`gram run --index index/v4_pileval_gpt2 --prompt "natural language processing"`
+
+Interactive run:
+
+`gram` -> `1` (run)
+
+Settings in run mode:
+
+`/settings`
+
+`/set topk 50`
+
+`/set temperature 0.8`
+
+`/gen 20 hello world`
+
+Notes:
+
+- Uses the tokenizer specified for the index in the catalog.
+- Some tokenizers require `HF_TOKEN` (for gated models like Llama-2).

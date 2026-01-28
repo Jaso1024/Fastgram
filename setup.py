@@ -48,4 +48,5 @@ setup(
     ext_modules=ext_modules,
     zip_safe=False,
     python_requires=">=3.11",
+    install_requires=["transformers>=4.0"],
 )

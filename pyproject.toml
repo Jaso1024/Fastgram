@@ -2,6 +2,7 @@
 name = "gram"
 version = "0.1.0"
 requires-python = ">=3.11"
+dependencies = ["transformers>=4.0"]
 
 [project.scripts]
 gram = "gram.cli:main"
