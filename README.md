@@ -23,3 +23,11 @@ Python:
 `python -m pip install -e .`
 
 `python -c "from gram import GramEngine; print(GramEngine)"`
+
+Download indices:
+
+Requires AWS CLI (`aws`).
+
+`gram list`
+
+`gram download v4_pileval_gpt2 --to index/v4_pileval_gpt2`

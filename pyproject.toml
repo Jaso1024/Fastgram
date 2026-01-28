@@ -3,7 +3,9 @@ name = "gram"
 version = "0.1.0"
 requires-python = ">=3.11"
 
+[project.scripts]
+gram = "gram.cli:main"
+
 [build-system]
 requires = ["setuptools>=42", "wheel", "pybind11"]
 build-backend = "setuptools.build_meta"
-
