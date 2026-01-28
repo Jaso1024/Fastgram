@@ -1,4 +1,4 @@
-# gram
+# Gram
 
 Single-machine mmap n-gram engine compatible with InfiniGram-style shard directories (`tokenized.*`, `table.*`, `offset.*`).
 
