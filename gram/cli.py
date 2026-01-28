@@ -1,5 +1,6 @@
 import argparse
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -88,9 +89,97 @@ def cmd_download(args: argparse.Namespace, extra_aws_args: List[str]) -> int:
     )
 
 
+def _interactive() -> int:
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        return _die("no command provided; run `gram list` or `gram download ...`")
+
+    indices = list_official_indices()
+    if not indices:
+        return _die("no indices in catalog")
+
+    aws = os.environ.get("GRAM_AWS", "aws")
+    base = Path(os.environ.get("GRAM_INDEX_DIR", "index"))
+
+    flt = ""
+    while True:
+        print()
+        print("Indices:")
+        shown: List[Tuple[str, str]] = []
+        for name, url in indices:
+            if flt and flt not in name:
+                continue
+            shown.append((name, url))
+        if not shown:
+            print("(no matches)")
+        else:
+            for i, (name, url) in enumerate(shown, 1):
+                print(f"{i}\t{name}\t{url}")
+
+        s = input("select number, filter text, or q: ").strip()
+        if s in ("q", "quit", "exit"):
+            return 0
+        if not s:
+            flt = ""
+            continue
+        if s.isdigit():
+            ix = int(s) - 1
+            if ix < 0 or ix >= len(shown):
+                print("invalid selection", file=sys.stderr)
+                continue
+            name, url = shown[ix]
+
+            default_dest = base / name
+            dest_in = input(f"dest [{default_dest}]: ").strip()
+            dest = Path(dest_in) if dest_in else default_dest
+
+            delete = input("delete extra local files? [y/N]: ").strip().lower() in ("y", "yes")
+            quiet = input("quiet? [y/N]: ").strip().lower() in ("y", "yes")
+            extra = input("extra aws args (optional): ").strip()
+            extra_args = shlex.split(extra) if extra else []
+
+            try:
+                _run_aws_sync(
+                    aws=aws,
+                    s3_url=url,
+                    dest=dest,
+                    delete=delete,
+                    quiet=quiet,
+                    extra_args=extra_args,
+                    dry_run=True,
+                )
+            except FileNotFoundError as e:
+                print(f"missing dependency: {e}", file=sys.stderr)
+                continue
+
+            run = input("run download? [y/N]: ").strip().lower() in ("y", "yes")
+            if not run:
+                continue
+            try:
+                _run_aws_sync(
+                    aws=aws,
+                    s3_url=url,
+                    dest=dest,
+                    delete=delete,
+                    quiet=quiet,
+                    extra_args=extra_args,
+                    dry_run=False,
+                )
+            except FileNotFoundError as e:
+                print(f"missing dependency: {e}", file=sys.stderr)
+                continue
+            except subprocess.CalledProcessError as e:
+                print(f"download failed: {e.returncode}", file=sys.stderr)
+                continue
+            continue
+
+        flt = s
+
+
 def main(argv: List[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
+    if not argv:
+        return _interactive()
 
     parser = argparse.ArgumentParser(prog="gram")
     sub = parser.add_subparsers(dest="cmd", required=True)
