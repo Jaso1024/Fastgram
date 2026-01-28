@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
-from .index_catalog import OFFICIAL_S3_INDICES
+from .index_catalog import list_official_indices, load_official_s3_indices
 
 
 def _die(msg: str) -> int:
@@ -14,25 +14,16 @@ def _die(msg: str) -> int:
     return 2
 
 
-def _infer_mode_from_s3_url(url: str) -> str:
-    if url.startswith("s3://infini-gram-lite/"):
-        return "no_sign"
-    if url.startswith("s3://infini-gram/"):
-        return "requester_pays"
-    return "auto"
-
-
-def _resolve_index_spec(name_or_url: str) -> Tuple[str, str, str]:
+def _resolve_index_spec(name_or_url: str) -> Tuple[str, str]:
     if name_or_url.startswith("s3://"):
         url = name_or_url
+        if not url.startswith("s3://infini-gram-lite/"):
+            raise KeyError(name_or_url)
         name = url.rstrip("/").split("/")[-1]
-        mode = _infer_mode_from_s3_url(url)
-        if mode == "auto":
-            mode = "no_sign"
-        return name, url, mode
-    if name_or_url in OFFICIAL_S3_INDICES:
-        url, mode = OFFICIAL_S3_INDICES[name_or_url]
-        return name_or_url, url, mode
+        return name, url
+    d = load_official_s3_indices()
+    if name_or_url in d:
+        return name_or_url, d[name_or_url]
     raise KeyError(name_or_url)
 
 
@@ -49,17 +40,13 @@ def _run_aws_sync(
     aws: str,
     s3_url: str,
     dest: Path,
-    mode: str,
     delete: bool,
     quiet: bool,
     extra_args: List[str],
     dry_run: bool,
 ) -> int:
     cmd = [_aws_bin(aws), "s3", "sync", s3_url, str(dest)]
-    if mode == "no_sign":
-        cmd.append("--no-sign-request")
-    elif mode == "requester_pays":
-        cmd.extend(["--request-payer", "requester"])
+    cmd.append("--no-sign-request")
     if delete:
         cmd.append("--delete")
     if quiet:
@@ -74,22 +61,16 @@ def _run_aws_sync(
 
 
 def cmd_list(_args: argparse.Namespace) -> int:
-    names = sorted(OFFICIAL_S3_INDICES.keys())
-    for name in names:
-        url, mode = OFFICIAL_S3_INDICES[name]
-        print(f"{name}\t{mode}\t{url}")
+    for name, url in list_official_indices():
+        print(f"{name}\t{url}")
     return 0
 
 
 def cmd_download(args: argparse.Namespace, extra_aws_args: List[str]) -> int:
     try:
-        name, url, default_mode = _resolve_index_spec(args.index)
+        name, url = _resolve_index_spec(args.index)
     except KeyError:
         return _die("unknown index; run `gram list`")
-
-    mode = args.mode
-    if mode == "auto":
-        mode = default_mode
 
     if args.to:
         dest = Path(args.to)
@@ -100,7 +81,6 @@ def cmd_download(args: argparse.Namespace, extra_aws_args: List[str]) -> int:
         aws=args.aws,
         s3_url=url,
         dest=dest,
-        mode=mode,
         delete=args.delete,
         quiet=args.quiet,
         extra_args=extra_aws_args,
@@ -122,7 +102,6 @@ def main(argv: List[str] | None = None) -> int:
     p_dl.add_argument("index")
     p_dl.add_argument("--to", default="")
     p_dl.add_argument("--aws", default="aws")
-    p_dl.add_argument("--mode", choices=["auto", "no_sign", "requester_pays"], default="auto")
     p_dl.add_argument("--delete", action="store_true")
     p_dl.add_argument("--quiet", action="store_true")
     p_dl.add_argument("--dry-run", action="store_true")
@@ -139,4 +118,3 @@ def main(argv: List[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -1,0 +1,5 @@
+{
+  "v4_dolmasample_olmo": "s3://infini-gram-lite/index/v4_dolmasample_olmo",
+  "v4_pileval_gpt2": "s3://infini-gram-lite/index/v4_pileval_gpt2",
+  "v4_pileval_llama": "s3://infini-gram-lite/index/v4_pileval_llama"
+}

@@ -44,7 +44,7 @@ setup(
     name="gram",
     version="0.1.0",
     packages=["gram"],
-    package_data={"gram": ["py.typed"]},
+    package_data={"gram": ["py.typed", "index_catalog.json"]},
     ext_modules=ext_modules,
     zip_safe=False,
     python_requires=">=3.11",

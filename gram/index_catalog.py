@@ -1,16 +1,24 @@
-OFFICIAL_S3_INDICES = {
-    "v4_olmoe-mix-0924-dclm_llama": ("s3://infini-gram/index/v4_olmoe-mix-0924-dclm_llama", "requester_pays"),
-    "v4_olmoe-mix-0924-nodclm_llama": ("s3://infini-gram/index/v4_olmoe-mix-0924-nodclm_llama", "requester_pays"),
-    "v4_olmo-2-0325-32b-anneal-adapt_llama": ("s3://infini-gram/index/v4_olmo-2-0325-32b-anneal-adapt_llama", "requester_pays"),
-    "v4_olmo-2-1124-13b-anneal-adapt_llama": ("s3://infini-gram/index/v4_olmo-2-1124-13b-anneal-adapt_llama", "requester_pays"),
-    "v4_olmoe-0125-1b-7b-anneal-adapt_llama": ("s3://infini-gram/index/v4_olmoe-0125-1b-7b-anneal-adapt_llama", "requester_pays"),
-    "v4_dolma-v1_7_llama": ("s3://infini-gram/index/v4_dolma-v1_7_llama", "requester_pays"),
-    "v4_rpj_llama_s4": ("s3://infini-gram/index/v4_rpj_llama_s4", "requester_pays"),
-    "v4_piletrain_llama": ("s3://infini-gram/index/v4_piletrain_llama", "requester_pays"),
-    "v4_c4train_llama": ("s3://infini-gram/index/v4_c4train_llama", "requester_pays"),
-    "v4_dolma-v1_6-sample_llama": ("s3://infini-gram/index/v4_dolma-v1_6-sample_llama", "requester_pays"),
-    "v4_dolmasample_olmo": ("s3://infini-gram-lite/index/v4_dolmasample_olmo", "no_sign"),
-    "v4_pileval_llama": ("s3://infini-gram-lite/index/v4_pileval_llama", "no_sign"),
-    "v4_pileval_gpt2": ("s3://infini-gram-lite/index/v4_pileval_gpt2", "no_sign"),
-}
+import json
+from functools import lru_cache
+from importlib.resources import files
+from typing import Dict, List, Tuple
+
+
+@lru_cache(maxsize=1)
+def load_official_s3_indices() -> Dict[str, str]:
+    p = files(__package__).joinpath("index_catalog.json")
+    data = json.loads(p.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise TypeError("index catalog must be a JSON object")
+    out: Dict[str, str] = {}
+    for k, v in data.items():
+        if not isinstance(k, str) or not isinstance(v, str):
+            raise TypeError("index catalog entries must be str -> str")
+        out[k] = v
+    return out
+
+
+def list_official_indices() -> List[Tuple[str, str]]:
+    d = load_official_s3_indices()
+    return sorted(d.items())
 
