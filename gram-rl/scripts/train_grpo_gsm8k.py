@@ -55,6 +55,7 @@ def main() -> int:
     p.add_argument("--batch-size", type=int, default=1)
     p.add_argument("--group-size", type=int, default=8)
     p.add_argument("--max-new-tokens", type=int, default=256)
+    p.add_argument("--accept-bonus", type=float, default=0.0)
     p.add_argument("--draft-k", type=int, default=16)
     p.add_argument("--max-support", type=int, default=500)
     p.add_argument("--draft-topk", type=int, default=50)
@@ -154,6 +155,8 @@ def main() -> int:
         all_seqs: list[list[int]] = []
         all_prompt_lens: list[int] = []
         all_rewards: list[float] = []
+        all_task_rewards: list[float] = []
+        all_bonus_rewards: list[float] = []
         all_groups: list[int] = []
         totals = {"proposed": 0, "accepted": 0, "target_tokens": 0}
 
@@ -189,13 +192,18 @@ def main() -> int:
                 )
                 full = out_ids[0].tolist()
                 text = tok.decode(full[prompt_len:], skip_special_tokens=True)
-                r = gsm8k_reward(completion_text=text, answer_text=ex["answer"])
+                task_r = gsm8k_reward(completion_text=text, answer_text=ex["answer"])
+                acc = (float(stats.accepted) / float(stats.proposed)) if stats.proposed else 0.0
+                bonus_r = float(args.accept_bonus) * acc if float(args.accept_bonus) != 0.0 else 0.0
+                r = float(task_r) + float(bonus_r)
                 totals["proposed"] += int(stats.proposed)
                 totals["accepted"] += int(stats.accepted)
                 totals["target_tokens"] += int(stats.target_tokens)
                 all_seqs.append(full)
                 all_prompt_lens.append(prompt_len)
                 all_rewards.append(float(r))
+                all_task_rewards.append(float(task_r))
+                all_bonus_rewards.append(float(bonus_r))
                 all_groups.append(b)
 
         adv_by_sample: list[float] = []
@@ -252,6 +260,8 @@ def main() -> int:
 
         elapsed = time.perf_counter() - t0
         mean_r = sum(all_rewards) / max(1, len(all_rewards))
+        mean_task_r = sum(all_task_rewards) / max(1, len(all_task_rewards))
+        mean_bonus_r = sum(all_bonus_rewards) / max(1, len(all_bonus_rewards))
         acc_rate = (totals["accepted"] / totals["proposed"]) if totals["proposed"] else 0.0
         print(
             f"step {step} loss {float(loss_obj.loss.item()):.4f} policy {float(loss_obj.policy_loss.item()):.4f} kl {float(loss_obj.kl_loss.item()):.4f} "
@@ -264,6 +274,8 @@ def main() -> int:
                 "policy_loss": float(loss_obj.policy_loss.item()),
                 "kl_loss": float(loss_obj.kl_loss.item()),
                 "reward_mean": float(mean_r),
+                "reward_task_mean": float(mean_task_r),
+                "reward_bonus_mean": float(mean_bonus_r),
                 "draft_proposed": totals["proposed"],
                 "draft_accepted": totals["accepted"],
                 "draft_acceptance_rate": float(acc_rate),

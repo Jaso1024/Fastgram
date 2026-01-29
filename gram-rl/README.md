@@ -19,6 +19,6 @@ python gram-rl/scripts/train_grpo_gsm8k.py \
   --index-gcs gs://fastgram-indices-jaso1024/reasoning \
   --index-dir index/reasoning \
   --sync-index \
+  --accept-bonus 0.2 \
   --steps 1000
 ```
-
