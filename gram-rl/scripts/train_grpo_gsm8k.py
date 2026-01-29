@@ -16,7 +16,7 @@ sys.path.insert(0, str(_ROOT / "gram-rl"))
 from fastgram import GramEngine
 from gram_decoding import gram_decode
 from gram_rl.gcs import sync_index_from_gcs
-from gram_rl.gsm8k import gsm8k_prompt, gsm8k_reward
+from gram_rl.gsm8k import gsm8k_format_instruction, gsm8k_prompt, gsm8k_reward, gsm8k_reward_components
 from gram_rl.grpo import grpo_loss
 from gram_rl.logprobs import pad_batch, token_logprobs_for_completions
 
@@ -32,8 +32,10 @@ def _adv_from_group(rewards: list[float], eps: float = 1e-6) -> list[float]:
     return [(r - m) / (s + eps) for r in rewards]
 
 
-def _make_chat_prompt(tok, question: str) -> str:
+def _make_chat_prompt(tok, question: str, *, format_instruction: str) -> str:
     base = gsm8k_prompt(question=question)
+    if format_instruction:
+        base = base + "\n" + str(format_instruction).strip()
     if hasattr(tok, "apply_chat_template"):
         msgs = [{"role": "user", "content": base}]
         return tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
@@ -112,6 +114,9 @@ def main() -> int:
     p.add_argument("--group-size", type=int, default=8)
     p.add_argument("--decode-mode", choices=["gram", "model"], default="gram")
     p.add_argument("--accept-bonus", type=float, default=0.0)
+    p.add_argument("--answer-format", choices=["none", "hash4"], default="none")
+    p.add_argument("--format-weight", type=float, default=0.0)
+    p.add_argument("--format-instruction", default="")
     p.add_argument("--draft-k", type=int, default=16)
     p.add_argument("--max-support", type=int, default=500)
     p.add_argument("--draft-topk", type=int, default=50)
@@ -226,6 +231,10 @@ def main() -> int:
     if is_main:
         save_dir.mkdir(parents=True, exist_ok=True)
 
+    fmt_style = str(args.answer_format)
+    fmt_inst = str(args.format_instruction).strip() or gsm8k_format_instruction(fmt_style)
+    fmt_w = float(args.format_weight)
+
     t0 = time.perf_counter()
     step = 0
     while step < int(args.steps):
@@ -237,11 +246,12 @@ def main() -> int:
         all_rewards: list[float] = []
         all_task_rewards: list[float] = []
         all_bonus_rewards: list[float] = []
+        all_format_rewards: list[float] = []
         all_groups: list[int] = []
         totals = {"proposed": 0, "accepted": 0, "target_tokens": 0}
 
         for b, ex in enumerate(batch):
-            prompt_text = _make_chat_prompt(tok, ex["question"])
+            prompt_text = _make_chat_prompt(tok, ex["question"], format_instruction=fmt_inst)
             prompt_ids = tok.encode(prompt_text, add_special_tokens=False)
             prompt_len = len(prompt_ids)
             max_new = max(1, int(max_ctx) - int(prompt_len) - 1)
@@ -287,18 +297,23 @@ def main() -> int:
                     )
                 full = out_ids[0].tolist()
                 text = tok.decode(full[prompt_len:], skip_special_tokens=True)
-                task_r = gsm8k_reward(completion_text=text, answer_text=ex["answer"])
+                if fmt_style == "none":
+                    ans_r = gsm8k_reward(completion_text=text, answer_text=ex["answer"])
+                    fmt_r = 0.0
+                else:
+                    ans_r, fmt_r = gsm8k_reward_components(completion_text=text, answer_text=ex["answer"], style=fmt_style)
                 acc = (float(stats.accepted) / float(stats.proposed)) if stats.proposed else 0.0
                 bonus_r = float(args.accept_bonus) * acc if float(args.accept_bonus) != 0.0 else 0.0
-                r = float(task_r) + float(bonus_r)
+                r = float(ans_r) + float(bonus_r) + float(fmt_w) * float(fmt_r)
                 totals["proposed"] += int(stats.proposed)
                 totals["accepted"] += int(stats.accepted)
                 totals["target_tokens"] += int(stats.target_tokens)
                 all_seqs.append(full)
                 all_prompt_lens.append(prompt_len)
                 all_rewards.append(float(r))
-                all_task_rewards.append(float(task_r))
+                all_task_rewards.append(float(ans_r))
                 all_bonus_rewards.append(float(bonus_r))
+                all_format_rewards.append(float(fmt_r))
                 all_groups.append(b)
 
         adv_by_sample: list[float] = []
@@ -379,6 +394,7 @@ def main() -> int:
                 float(sum(all_rewards)),
                 float(sum(all_task_rewards)),
                 float(sum(all_bonus_rewards)),
+                float(sum(all_format_rewards)),
                 float(totals["proposed"]),
                 float(totals["accepted"]),
                 float(totals["target_tokens"]),
@@ -388,10 +404,11 @@ def main() -> int:
             device=device,
         )
         _ddp_reduce(sums, dist.ReduceOp.SUM if world > 1 else None)
-        sum_r, sum_task_r, sum_bonus_r, proposed, accepted, target_tokens, total_count = [float(x) for x in sums.tolist()]
+        sum_r, sum_task_r, sum_bonus_r, sum_fmt_r, proposed, accepted, target_tokens, total_count = [float(x) for x in sums.tolist()]
         mean_r = sum_r / max(1.0, total_count)
         mean_task_r = sum_task_r / max(1.0, total_count)
         mean_bonus_r = sum_bonus_r / max(1.0, total_count)
+        mean_fmt_r = sum_fmt_r / max(1.0, total_count)
         acc_rate = (accepted / proposed) if proposed else 0.0
 
         denom = float(max(1, upd))
@@ -413,6 +430,7 @@ def main() -> int:
                 "reward_mean": float(mean_r),
                 "reward_task_mean": float(mean_task_r),
                 "reward_bonus_mean": float(mean_bonus_r),
+                "reward_format_mean": float(mean_fmt_r),
                 "draft_proposed": int(proposed),
                 "draft_accepted": int(accepted),
                 "draft_acceptance_rate": float(acc_rate),
