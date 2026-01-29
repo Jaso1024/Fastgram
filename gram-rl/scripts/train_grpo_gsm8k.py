@@ -40,6 +40,19 @@ def _make_chat_prompt(tok, question: str) -> str:
     return base
 
 
+def _infer_max_context_len(tok, model) -> int:
+    vals = []
+    for v in [
+        getattr(getattr(model, "config", None), "max_position_embeddings", None),
+        getattr(getattr(model, "config", None), "max_sequence_length", None),
+        getattr(getattr(model, "config", None), "max_seq_len", None),
+        getattr(tok, "model_max_length", None),
+    ]:
+        if isinstance(v, int) and 0 < v < 1_000_000:
+            vals.append(int(v))
+    return min(vals) if vals else 4096
+
+
 def _ddp_env() -> tuple[int, int, int]:
     rank = int(os.environ.get("RANK", "0"))
     world = int(os.environ.get("WORLD_SIZE", "1"))
@@ -69,7 +82,6 @@ def main() -> int:
     p.add_argument("--steps", type=int, default=1000)
     p.add_argument("--batch-size", type=int, default=1)
     p.add_argument("--group-size", type=int, default=8)
-    p.add_argument("--max-new-tokens", type=int, default=256)
     p.add_argument("--accept-bonus", type=float, default=0.0)
     p.add_argument("--draft-k", type=int, default=16)
     p.add_argument("--max-support", type=int, default=500)
@@ -175,6 +187,7 @@ def main() -> int:
 
     ds = load_dataset("gsm8k", "main", split="train")
     opt = torch.optim.AdamW(model.parameters(), lr=float(args.lr))
+    max_ctx = _infer_max_context_len(tok, model.module if hasattr(model, "module") else model)
 
     save_dir = Path(args.save_dir)
     if is_main:
@@ -198,6 +211,7 @@ def main() -> int:
             prompt_text = _make_chat_prompt(tok, ex["question"])
             prompt_ids = tok.encode(prompt_text, add_special_tokens=False)
             prompt_len = len(prompt_ids)
+            max_new = max(1, int(max_ctx) - int(prompt_len) - 1)
             for g in range(int(args.group_size)):
                 seed = (int(args.seed) if int(args.seed) != 0 else 0) + step * 100000 + b * 1000 + g
                 input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=device)
@@ -206,7 +220,7 @@ def main() -> int:
                     tokenizer=tok,
                     engine=engine,
                     input_ids=input_ids,
-                    max_new_tokens=int(args.max_new_tokens),
+                    max_new_tokens=int(max_new),
                     draft_k=int(args.draft_k),
                     max_support=int(args.max_support),
                     draft_mode="infgram",

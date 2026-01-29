@@ -23,7 +23,6 @@ python gram-decoding/scripts/gram_decode.py \
   --model gpt2 \
   --index-dir index/v4_pileval_gpt2 \
   --prompt "Write a short paragraph about fast text search." \
-  --max-new-tokens 64 \
   --draft-k 8 \
   --max-support 200
 ```

@@ -24,12 +24,24 @@ def _infer_token_dtype(vocab_size: int) -> str:
     return "u32"
 
 
+def _infer_max_context_len(tok, model) -> int:
+    vals = []
+    for v in [
+        getattr(getattr(model, "config", None), "max_position_embeddings", None),
+        getattr(getattr(model, "config", None), "max_sequence_length", None),
+        getattr(getattr(model, "config", None), "max_seq_len", None),
+        getattr(tok, "model_max_length", None),
+    ]:
+        if isinstance(v, int) and 0 < v < 1_000_000:
+            vals.append(int(v))
+    return min(vals) if vals else 4096
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Gram decoding (fastgram draft, HF verifier)")
     p.add_argument("--model", default="gpt2")
     p.add_argument("--index-dir", required=True)
     p.add_argument("--prompt", default="Write a short paragraph about fast text search.")
-    p.add_argument("--max-new-tokens", type=int, default=64)
     p.add_argument("--draft-k", type=int, default=8)
     p.add_argument("--max-support", type=int, default=200)
     p.add_argument("--version", type=int, default=4)
@@ -81,6 +93,7 @@ def main() -> int:
 
     prompt_ids = tok.encode(args.prompt, add_special_tokens=False)
     input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=device)
+    max_new = max(1, _infer_max_context_len(tok, model) - len(prompt_ids) - 1)
 
     eos = tok.eos_token_id
     if eos is None:
@@ -103,7 +116,7 @@ def main() -> int:
         tokenizer=tok,
         engine=engine,
         input_ids=input_ids,
-        max_new_tokens=int(args.max_new_tokens),
+        max_new_tokens=int(max_new),
         draft_k=int(args.draft_k),
         max_support=int(args.max_support),
         draft_mode=args.draft_mode,
