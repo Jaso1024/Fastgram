@@ -84,7 +84,7 @@ def main() -> int:
     p.add_argument("--target-temperature", type=float, default=0.8)
     p.add_argument("--clip-eps", type=float, default=0.2)
     p.add_argument("--kl-beta", type=float, default=0.02)
-    p.add_argument("--ratio-mode", choices=["sequence", "token"], default="sequence")
+    p.add_argument("--ratio-mode", choices=["sequence", "sequence_sum", "token"], default="sequence")
     p.add_argument("--kl-estimator", choices=["nonneg", "sample"], default="nonneg")
     p.add_argument("--lr", type=float, default=5e-6)
     p.add_argument("--seed", type=int, default=0)

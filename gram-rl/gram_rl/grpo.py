@@ -30,20 +30,29 @@ def grpo_loss(
         raise ValueError("advantages must be [B]")
 
     log_ratio = logp_new - logp_old
+    token_count = token_mask.sum(dim=1).clamp_min(1)
     if str(ratio_mode) == "token":
         adv = advantages.unsqueeze(1)
         ratio = torch.exp(log_ratio)
         ratio_clipped = torch.clamp(ratio, 1.0 - float(clip_eps), 1.0 + float(clip_eps))
         obj = torch.minimum(ratio * adv, ratio_clipped * adv)
-        policy_loss = -(obj[token_mask]).mean()
+        obj = obj * token_mask
+        obj_seq = obj.sum(dim=1) / token_count
+        policy_loss = -(obj_seq).mean()
     elif str(ratio_mode) == "sequence":
+        log_ratio_seq = (log_ratio * token_mask).sum(dim=1) / token_count
+        ratio = torch.exp(log_ratio_seq)
+        ratio_clipped = torch.clamp(ratio, 1.0 - float(clip_eps), 1.0 + float(clip_eps))
+        obj = torch.minimum(ratio * advantages, ratio_clipped * advantages)
+        policy_loss = -(obj).mean()
+    elif str(ratio_mode) == "sequence_sum":
         log_ratio_seq = (log_ratio * token_mask).sum(dim=1)
         ratio = torch.exp(log_ratio_seq)
         ratio_clipped = torch.clamp(ratio, 1.0 - float(clip_eps), 1.0 + float(clip_eps))
         obj = torch.minimum(ratio * advantages, ratio_clipped * advantages)
         policy_loss = -(obj).mean()
     else:
-        raise ValueError("ratio_mode must be 'sequence' or 'token'")
+        raise ValueError("ratio_mode must be 'sequence', 'sequence_sum', or 'token'")
 
     log_r = (logp_new - ref_logp)
     if str(kl_estimator) == "sample":
