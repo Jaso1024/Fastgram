@@ -33,5 +33,7 @@ torchrun --standalone --nproc_per_node=4 gram-rl/scripts/train_grpo_gsm8k.py \
   --accept-bonus 0.2 \
   --ratio-mode sequence \
   --kl-estimator nonneg \
+  --update-epochs 2 \
+  --minibatch-size 4 \
   --steps 1000
 ```

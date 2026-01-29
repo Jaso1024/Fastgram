@@ -127,6 +127,8 @@ def main() -> int:
     p.add_argument("--kl-beta", type=float, default=0.02)
     p.add_argument("--ratio-mode", choices=["sequence", "sequence_sum", "token"], default="sequence")
     p.add_argument("--kl-estimator", choices=["nonneg", "sample"], default="nonneg")
+    p.add_argument("--update-epochs", type=int, default=1)
+    p.add_argument("--minibatch-size", type=int, default=0)
     p.add_argument("--lr", type=float, default=5e-6)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--save-dir", default="runs/gram_rl")
@@ -330,28 +332,45 @@ def main() -> int:
             ref_logp = ref_lp.token_logp.detach()
             token_mask = old.token_mask.detach()
 
-        new = token_logprobs_for_completions(
-            model=model,
-            input_ids=ids,
-            attention_mask=attn,
-            prompt_lens=pl,
-            pad_token_id=int(tok.pad_token_id),
-        )
-        loss_obj = grpo_loss(
-            logp_new=new.token_logp,
-            logp_old=old_logp,
-            token_mask=token_mask,
-            advantages=adv_t,
-            ref_logp=ref_logp,
-            clip_eps=float(args.clip_eps),
-            kl_beta=float(args.kl_beta),
-            ratio_mode=str(args.ratio_mode),
-            kl_estimator=str(args.kl_estimator),
-        )
-
-        opt.zero_grad(set_to_none=True)
-        loss_obj.loss.backward()
-        opt.step()
+        bsz = ids.shape[0]
+        mb = int(args.minibatch_size)
+        if mb <= 0 or mb > bsz:
+            mb = bsz
+        epochs = max(1, int(args.update_epochs))
+        idx_all = torch.arange(bsz, device=device)
+        loss_sum = 0.0
+        policy_sum = 0.0
+        kl_sum = 0.0
+        upd = 0
+        for _ep in range(epochs):
+            perm = idx_all[torch.randperm(bsz, device=device)]
+            for start in range(0, bsz, mb):
+                ix = perm[start : start + mb]
+                new = token_logprobs_for_completions(
+                    model=model,
+                    input_ids=ids.index_select(0, ix),
+                    attention_mask=attn.index_select(0, ix),
+                    prompt_lens=pl.index_select(0, ix),
+                    pad_token_id=int(tok.pad_token_id),
+                )
+                loss_obj = grpo_loss(
+                    logp_new=new.token_logp,
+                    logp_old=old_logp.index_select(0, ix),
+                    token_mask=token_mask.index_select(0, ix),
+                    advantages=adv_t.index_select(0, ix),
+                    ref_logp=ref_logp.index_select(0, ix),
+                    clip_eps=float(args.clip_eps),
+                    kl_beta=float(args.kl_beta),
+                    ratio_mode=str(args.ratio_mode),
+                    kl_estimator=str(args.kl_estimator),
+                )
+                opt.zero_grad(set_to_none=True)
+                loss_obj.loss.backward()
+                opt.step()
+                loss_sum += float(loss_obj.loss.item())
+                policy_sum += float(loss_obj.policy_loss.item())
+                kl_sum += float(loss_obj.kl_loss.item())
+                upd += 1
 
         elapsed = time.perf_counter() - t0
         count = max(1, len(all_rewards))
@@ -375,11 +394,8 @@ def main() -> int:
         mean_bonus_r = sum_bonus_r / max(1.0, total_count)
         acc_rate = (accepted / proposed) if proposed else 0.0
 
-        losses = torch.tensor(
-            [float(loss_obj.loss.item()), float(loss_obj.policy_loss.item()), float(loss_obj.kl_loss.item())],
-            dtype=torch.float64,
-            device=device,
-        )
+        denom = float(max(1, upd))
+        losses = torch.tensor([loss_sum / denom, policy_sum / denom, kl_sum / denom], dtype=torch.float64, device=device)
         _ddp_reduce(losses, dist.ReduceOp.SUM if world > 1 else None)
         loss_mean, policy_mean, kl_mean = [float(x) / float(world) for x in losses.tolist()]
 
@@ -402,6 +418,7 @@ def main() -> int:
                 "draft_acceptance_rate": float(acc_rate),
                 "target_tokens": int(target_tokens),
                 "elapsed_sec": float(elapsed),
+                "update_steps": int(upd),
             }
             if device.type == "cuda":
                 log["gpu_mem_allocated_gb"] = float(torch.cuda.memory_allocated() / (1024**3))
