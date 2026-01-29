@@ -40,6 +40,21 @@ def _make_chat_prompt(tok, question: str) -> str:
     return base
 
 
+def _ddp_env() -> tuple[int, int, int]:
+    rank = int(os.environ.get("RANK", "0"))
+    world = int(os.environ.get("WORLD_SIZE", "1"))
+    local = int(os.environ.get("LOCAL_RANK", "0"))
+    return rank, world, local
+
+
+def _ddp_reduce(t, op):
+    import torch.distributed as dist
+
+    if dist.is_available() and dist.is_initialized():
+        dist.all_reduce(t, op=op)
+    return t
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="GRPO-ish training on GSM8K with gram-assisted decoding")
     p.add_argument("--model", default="Qwen/Qwen2.5-1.5B-Instruct")
@@ -75,22 +90,36 @@ def main() -> int:
     p.add_argument("--save-every", type=int, default=200)
     args = p.parse_args()
 
+    rank, world, local_rank = _ddp_env()
+    is_main = rank == 0
+
     if args.seed:
-        random.seed(int(args.seed))
-        os.environ["PYTHONHASHSEED"] = str(int(args.seed))
+        random.seed(int(args.seed) + rank)
+        os.environ["PYTHONHASHSEED"] = str(int(args.seed) + rank)
 
     try:
         import torch
+        import torch.distributed as dist
+        from torch.nn.parallel import DistributedDataParallel as DDP
         from datasets import load_dataset
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except Exception as e:
         raise SystemExit(f"missing dependency: {e}")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
+        device = torch.device("cuda", local_rank)
+        backend = "nccl"
+    else:
+        device = torch.device("cpu")
+        backend = "gloo"
+
+    if world > 1:
+        dist.init_process_group(backend=backend)
     torch_dtype = torch.bfloat16 if device.type == "cuda" else torch.float32
 
     wandb_run = None
-    if args.wandb:
+    if args.wandb and is_main:
         import wandb
 
         tags = [t.strip() for t in str(args.wandb_tags).split(",") if t.strip()]
@@ -112,6 +141,8 @@ def main() -> int:
     model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch_dtype, trust_remote_code=True)
     model.to(device)
     model.train()
+    if world > 1:
+        model = DDP(model, device_ids=[local_rank] if device.type == "cuda" else None)
 
     ref = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch_dtype, trust_remote_code=True)
     ref.to(device)
@@ -144,7 +175,8 @@ def main() -> int:
     opt = torch.optim.AdamW(model.parameters(), lr=float(args.lr))
 
     save_dir = Path(args.save_dir)
-    save_dir.mkdir(parents=True, exist_ok=True)
+    if is_main:
+        save_dir.mkdir(parents=True, exist_ok=True)
 
     t0 = time.perf_counter()
     step = 0
@@ -259,27 +291,53 @@ def main() -> int:
         opt.step()
 
         elapsed = time.perf_counter() - t0
-        mean_r = sum(all_rewards) / max(1, len(all_rewards))
-        mean_task_r = sum(all_task_rewards) / max(1, len(all_task_rewards))
-        mean_bonus_r = sum(all_bonus_rewards) / max(1, len(all_bonus_rewards))
-        acc_rate = (totals["accepted"] / totals["proposed"]) if totals["proposed"] else 0.0
-        print(
-            f"step {step} loss {float(loss_obj.loss.item()):.4f} policy {float(loss_obj.policy_loss.item()):.4f} kl {float(loss_obj.kl_loss.item()):.4f} "
-            f"reward {mean_r:.3f} elapsed {elapsed:.1f}s"
+        count = max(1, len(all_rewards))
+        sums = torch.tensor(
+            [
+                float(sum(all_rewards)),
+                float(sum(all_task_rewards)),
+                float(sum(all_bonus_rewards)),
+                float(totals["proposed"]),
+                float(totals["accepted"]),
+                float(totals["target_tokens"]),
+                float(count),
+            ],
+            dtype=torch.float64,
+            device=device,
         )
+        _ddp_reduce(sums, dist.ReduceOp.SUM if world > 1 else None)
+        sum_r, sum_task_r, sum_bonus_r, proposed, accepted, target_tokens, total_count = [float(x) for x in sums.tolist()]
+        mean_r = sum_r / max(1.0, total_count)
+        mean_task_r = sum_task_r / max(1.0, total_count)
+        mean_bonus_r = sum_bonus_r / max(1.0, total_count)
+        acc_rate = (accepted / proposed) if proposed else 0.0
+
+        losses = torch.tensor(
+            [float(loss_obj.loss.item()), float(loss_obj.policy_loss.item()), float(loss_obj.kl_loss.item())],
+            dtype=torch.float64,
+            device=device,
+        )
+        _ddp_reduce(losses, dist.ReduceOp.SUM if world > 1 else None)
+        loss_mean, policy_mean, kl_mean = [float(x) / float(world) for x in losses.tolist()]
+
+        if is_main:
+            print(
+                f"step {step} loss {loss_mean:.4f} policy {policy_mean:.4f} kl {kl_mean:.4f} "
+                f"reward {mean_r:.3f} elapsed {elapsed:.1f}s"
+            )
         if wandb_run is not None:
             log = {
                 "step": step,
-                "loss": float(loss_obj.loss.item()),
-                "policy_loss": float(loss_obj.policy_loss.item()),
-                "kl_loss": float(loss_obj.kl_loss.item()),
+                "loss": float(loss_mean),
+                "policy_loss": float(policy_mean),
+                "kl_loss": float(kl_mean),
                 "reward_mean": float(mean_r),
                 "reward_task_mean": float(mean_task_r),
                 "reward_bonus_mean": float(mean_bonus_r),
-                "draft_proposed": totals["proposed"],
-                "draft_accepted": totals["accepted"],
+                "draft_proposed": int(proposed),
+                "draft_accepted": int(accepted),
                 "draft_acceptance_rate": float(acc_rate),
-                "target_tokens": totals["target_tokens"],
+                "target_tokens": int(target_tokens),
                 "elapsed_sec": float(elapsed),
             }
             if device.type == "cuda":
@@ -289,17 +347,25 @@ def main() -> int:
 
         step += 1
         if int(args.save_every) > 0 and step % int(args.save_every) == 0:
-            out = save_dir / f"step_{step}"
-            out.mkdir(parents=True, exist_ok=True)
-            model.save_pretrained(out)
-            tok.save_pretrained(out)
+            if is_main:
+                out = save_dir / f"step_{step}"
+                out.mkdir(parents=True, exist_ok=True)
+                m = model.module if hasattr(model, "module") else model
+                m.save_pretrained(out)
+                tok.save_pretrained(out)
 
-    out = save_dir / "final"
-    out.mkdir(parents=True, exist_ok=True)
-    model.save_pretrained(out)
-    tok.save_pretrained(out)
+    if world > 1:
+        dist.barrier()
+    if is_main:
+        out = save_dir / "final"
+        out.mkdir(parents=True, exist_ok=True)
+        m = model.module if hasattr(model, "module") else model
+        m.save_pretrained(out)
+        tok.save_pretrained(out)
     if wandb_run is not None:
         wandb_run.finish()
+    if world > 1:
+        dist.destroy_process_group()
     return 0
 
 

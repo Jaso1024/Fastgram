@@ -22,3 +22,14 @@ python gram-rl/scripts/train_grpo_gsm8k.py \
   --accept-bonus 0.2 \
   --steps 1000
 ```
+
+## Train (4 GPUs, DDP)
+
+```bash
+torchrun --standalone --nproc_per_node=4 gram-rl/scripts/train_grpo_gsm8k.py \
+  --model Qwen/Qwen2.5-1.5B-Instruct \
+  --index-dir index/reasoning \
+  --wandb \
+  --accept-bonus 0.2 \
+  --steps 1000
+```
