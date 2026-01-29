@@ -19,6 +19,8 @@ def grpo_loss(
     ref_logp: "torch.Tensor",
     clip_eps: float,
     kl_beta: float,
+    ratio_mode: str = "sequence",
+    kl_estimator: str = "nonneg",
 ) -> GrpoLoss:
     import torch
 
@@ -27,14 +29,30 @@ def grpo_loss(
     if advantages.ndim != 1:
         raise ValueError("advantages must be [B]")
 
-    adv = advantages.unsqueeze(1)
-    ratio = torch.exp(logp_new - logp_old)
-    ratio_clipped = torch.clamp(ratio, 1.0 - float(clip_eps), 1.0 + float(clip_eps))
-    obj = torch.minimum(ratio * adv, ratio_clipped * adv)
-    policy_loss = -(obj[token_mask]).mean()
+    log_ratio = logp_new - logp_old
+    if str(ratio_mode) == "token":
+        adv = advantages.unsqueeze(1)
+        ratio = torch.exp(log_ratio)
+        ratio_clipped = torch.clamp(ratio, 1.0 - float(clip_eps), 1.0 + float(clip_eps))
+        obj = torch.minimum(ratio * adv, ratio_clipped * adv)
+        policy_loss = -(obj[token_mask]).mean()
+    elif str(ratio_mode) == "sequence":
+        log_ratio_seq = (log_ratio * token_mask).sum(dim=1)
+        ratio = torch.exp(log_ratio_seq)
+        ratio_clipped = torch.clamp(ratio, 1.0 - float(clip_eps), 1.0 + float(clip_eps))
+        obj = torch.minimum(ratio * advantages, ratio_clipped * advantages)
+        policy_loss = -(obj).mean()
+    else:
+        raise ValueError("ratio_mode must be 'sequence' or 'token'")
 
-    kl = (logp_new - ref_logp)
-    kl_loss = (kl[token_mask]).mean() * float(kl_beta)
+    log_r = (logp_new - ref_logp)
+    if str(kl_estimator) == "sample":
+        kl_tok = log_r
+    elif str(kl_estimator) == "nonneg":
+        r = torch.exp(log_r)
+        kl_tok = (r - 1.0) - log_r
+    else:
+        raise ValueError("kl_estimator must be 'nonneg' or 'sample'")
+    kl_loss = (kl_tok[token_mask]).mean() * float(kl_beta)
 
     return GrpoLoss(loss=policy_loss + kl_loss, policy_loss=policy_loss, kl_loss=kl_loss)
-

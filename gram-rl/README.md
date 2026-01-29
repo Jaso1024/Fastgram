@@ -31,5 +31,7 @@ torchrun --standalone --nproc_per_node=4 gram-rl/scripts/train_grpo_gsm8k.py \
   --index-dir index/reasoning \
   --wandb \
   --accept-bonus 0.2 \
+  --ratio-mode sequence \
+  --kl-estimator nonneg \
   --steps 1000
 ```
