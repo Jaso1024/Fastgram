@@ -2,3 +2,4 @@ transformers
 datasets
 tiktoken
 blobfile
+zstandard

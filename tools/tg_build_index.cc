@@ -124,7 +124,7 @@ std::vector<std::uint32_t> BuildSuffixArray(const std::vector<std::uint32_t>& s)
 }
 
 std::vector<std::uint8_t> EncodeTable(const std::vector<std::uint32_t>& sa, std::size_t token_width, std::uint8_t* ptr_size_out) {
-  const std::uint64_t max_ptr = (sa.empty() ? 0 : static_cast<std::uint64_t>(sa.back()) * token_width);
+  const std::uint64_t max_ptr = (sa.empty() ? 0 : static_cast<std::uint64_t>(sa.size() - 1) * token_width);
   std::uint8_t ptr_size = 1;
   while ((max_ptr >> (ptr_size * 8)) != 0) ptr_size++;
   const std::size_t out_sz = sa.size() * ptr_size;

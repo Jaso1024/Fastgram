@@ -5,9 +5,21 @@ import struct
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
+import io
+import json
 
 import datasets
 from transformers import AutoTokenizer
+
+# Optional imports for raw ingestion
+try:
+    import pyarrow.parquet as pq
+    from huggingface_hub import HfFileSystem
+    import zstandard as zstd
+except ImportError:
+    pq = None
+    HfFileSystem = None
+    zstd = None
 
 
 def _write_u32(f, val):
@@ -34,7 +46,6 @@ class TokenizerWrapper:
 
     def encode(self, text: str) -> List[int]:
         # We want clean tokenization.
-        # For general text, we usually want to append EOS to separate documents.
         ids = self.tokenizer.encode(text, add_special_tokens=False)
         ids.append(self.eos_token_id)
         return ids
@@ -49,6 +60,117 @@ def worker_process(text):
     return _TOKENIZER.encode(text)
 
 
+def format_deepseek_chat(messages: List[Dict]) -> str:
+    """Formats a list of messages into a single training string."""
+    text = ""
+    for msg in messages:
+        role = msg.get('role', '')
+        content = msg.get('content', '')
+        
+        # DeepSeek R1 specific handling for 'info'/'think_content' if present in struct
+        # Structure seen: {'content': '...', 'info': {'think_content': '...'}, 'role': '...'}
+        info = msg.get('info')
+        think = ""
+        if isinstance(info, dict):
+            think = info.get('think_content', '')
+        
+        if role == 'user':
+            text += f"<|im_start|>user\n{content}<|im_end|>\n"
+        elif role == 'assistant':
+            text += "<|im_start|>assistant\n"
+            if think:
+                text += f"<think>\n{think}\n</think>\n"
+            text += f"{content}<|im_end|>\n"
+        else:
+            # System or other
+            text += f"<|im_start|>{role}\n{content}<|im_end|>\n"
+    
+    text += "<|endoftext|>"
+    return text
+
+
+def iter_raw_files(dataset: str, subset: Optional[str] = None, split: str = "train", limit: Optional[int] = None):
+    """
+    Iterates over a dataset by reading raw files (parquet, jsonl, jsonl.zst) via HfFileSystem.
+    """
+    if HfFileSystem is None:
+        raise ImportError("huggingface_hub, pyarrow, zstandard are required for raw ingestion")
+    
+    fs = HfFileSystem()
+    base_path = f"hf://datasets/{dataset}"
+    
+    # Heuristic patterns for finding data files
+    patterns = []
+    if subset:
+        # e.g. am_0.9M.jsonl.zst at root matching subset name
+        patterns.append(f"{base_path}/{subset}.jsonl.zst")
+        patterns.append(f"{base_path}/{subset}.jsonl")
+        patterns.append(f"{base_path}/{subset}/*.parquet")
+        patterns.append(f"{base_path}/{subset}/data/*.parquet")
+    else:
+        patterns.append(f"{base_path}/*.jsonl.zst")
+        patterns.append(f"{base_path}/*.jsonl")
+        patterns.append(f"{base_path}/*.parquet")
+        patterns.append(f"{base_path}/data/*.parquet")
+        
+    files = []
+    for p in patterns:
+        try:
+            found = fs.glob(p)
+            if found:
+                files.extend(found)
+        except Exception:
+            pass
+            
+    if not files:
+        print(f"Warning: No data files found for {dataset} with patterns {patterns}")
+        return
+
+    # Deduplicate
+    files = sorted(list(set(files)))
+    print(f"Found {len(files)} files for raw ingestion: {files}")
+    
+    count = 0
+    for file_path in files:
+        print(f"Processing raw file: {file_path}")
+        file_type = "parquet" if file_path.endswith(".parquet") else "jsonl"
+        is_zst = file_path.endswith(".zst")
+        
+        with fs.open(file_path, "rb") as f:
+            try:
+                if file_type == "parquet":
+                    pq_file = pq.ParquetFile(f)
+                    for batch in pq_file.iter_batches():
+                        pylist = batch.to_pylist()
+                        for row in pylist:
+                            yield row
+                            count += 1
+                            if limit and count >= limit:
+                                return
+                elif file_type == "jsonl":
+                    stream = f
+                    if is_zst:
+                        dctx = zstd.ZstdDecompressor()
+                        stream = dctx.stream_reader(f)
+                        stream = io.TextIOWrapper(stream, encoding='utf-8')
+                    else:
+                        stream = io.TextIOWrapper(f, encoding='utf-8')
+                        
+                    for line in stream:
+                        if not line.strip(): continue
+                        try:
+                            row = json.loads(line)
+                            yield row
+                            count += 1
+                            if limit and count >= limit:
+                                return
+                        except json.JSONDecodeError:
+                            pass
+                            
+            except Exception as e:
+                print(f"Error reading {file_path}: {e}. Skipping file.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Ingest HF datasets into fastgram tokenized.0 format")
     parser.add_argument("--dataset", required=True, help="HuggingFace dataset name")
@@ -61,6 +183,7 @@ def main():
     parser.add_argument("--limit", type=int, default=None, help="Limit number of docs")
     parser.add_argument("--buffer-size", type=int, default=1000, help="Write buffer size (number of docs)")
     parser.add_argument("--shard-size", type=int, default=2_000_000_000, help="Tokens per shard")
+    parser.add_argument("--force-raw", action="store_true", help="Force raw ingestion")
     
     args = parser.parse_args()
     
@@ -68,18 +191,32 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"Loading tokenizer: {args.tokenizer}")
-    # Initialize tokenizer in main process to check it works
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, trust_remote_code=True)
     vocab_size = tokenizer.vocab_size
     print(f"Vocab size: {vocab_size} -> using u32")
     
-    print(f"Loading dataset: {args.dataset}")
-    ds = datasets.load_dataset(args.dataset, args.subset, split=args.split, streaming=True)
+    # Determine ingestion method
+    iterable_ds = None
     
-    if args.limit:
-        ds = ds.take(args.limit)
+    # Heuristic: DeepSeek datasets often have schema issues with 'datasets' lib
+    is_deepseek = "DeepSeek" in args.dataset
     
-    # We use a pool of workers to tokenize
+    if args.force_raw or is_deepseek:
+        print(f"Using RAW FILE ingestion for {args.dataset}")
+        iterable_ds = iter_raw_files(args.dataset, args.subset, args.split, args.limit)
+    else:
+        print(f"Using STANDARD ingestion for {args.dataset}")
+        try:
+            iterable_ds = datasets.load_dataset(
+                args.dataset, args.subset, split=args.split, streaming=True, verification_mode="no_checks"
+            )
+            if args.limit:
+                iterable_ds = iterable_ds.take(args.limit)
+        except Exception as e:
+            print(f"Standard loading failed ({e}), falling back to RAW ingestion.")
+            iterable_ds = iter_raw_files(args.dataset, args.subset, args.split, args.limit)
+
+    # Workers
     ctx = mp.get_context("spawn")
     pool = ctx.Pool(args.proc, initializer=worker_init, initargs=(args.tokenizer,))
     
@@ -90,12 +227,9 @@ def main():
     total_docs = 0
     shard_idx = 0
     current_shard_tokens = 0
-    
-    # Open first shard
     current_f = open(out_dir / f"tokenized.{shard_idx}", "wb")
     
     try:
-        # We process in batches to keep the pool fed
         batch_docs = []
         
         def flush_batch():
@@ -103,19 +237,15 @@ def main():
             if not batch_docs:
                 return
             
-            # Parallel tokenize
             results = pool.map(worker_process, batch_docs)
             
-            # Write to disk
             for ids in results:
-                # Check if we need to rotate shard
                 if current_shard_tokens + len(ids) > args.shard_size:
                     current_f.close()
                     shard_idx += 1
                     current_f = open(out_dir / f"tokenized.{shard_idx}", "wb")
                     current_shard_tokens = 0
 
-                # Write u32 little endian
                 for token in ids:
                     current_f.write(struct.pack("<I", token))
                 
@@ -124,22 +254,32 @@ def main():
             
             total_docs += len(results)
             batch_docs.clear()
-            
             elapsed = time.time() - start_time
             print(f"\rDocs: {total_docs} | Tokens: {total_tokens} | Shard: {shard_idx} | Rate: {total_tokens/max(1, elapsed):.2f} tok/s", end="")
 
-        for i, item in enumerate(ds):
-            text = item.get(args.column, "")
+        for i, item in enumerate(iterable_ds):
+            # Extraction logic
+            text = ""
+            if "messages" in item and isinstance(item["messages"], list):
+                # Chat format
+                text = format_deepseek_chat(item["messages"])
+            else:
+                # Standard text format
+                text = item.get(args.column, "")
+            
             if not text:
                 continue
             
             batch_docs.append(text)
-            
             if len(batch_docs) >= args.buffer_size:
                 flush_batch()
                 
-        flush_batch() # Flush remaining
+        flush_batch()
 
+    except Exception as e:
+        print(f"\nCRITICAL ERROR during ingestion: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         if not current_f.closed:
             current_f.close()

@@ -13,3 +13,4 @@ bench/build_refs/
 dist/
 *.whl
 *.tar.gz
+index_factory/indices/

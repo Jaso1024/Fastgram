@@ -45,6 +45,26 @@ gram download <index>         # download an index
 gram run --index <path>       # run queries interactively
 ```
 
+## Available Indices
+
+Fastgram currently supports the following pre-built indices:
+
+1.  **Pile-Val (GPT-2):**
+    *   **Dataset:** `mit-han-lab/pile-val-backup`
+    *   **Tokenizer:** `gpt2`
+    *   **Description:** A standard validation set for language modeling benchmarks.
+
+2.  **Dolma Sample (OLMo):**
+    *   **Dataset:** `allenai/dolma` (sample)
+    *   **Tokenizer:** `allenai/OLMo-7B-Twin-2T`
+    *   **Description:** A sample from the Dolma dataset used for training OLMo models.
+
+3.  **Reasoning (DeepSeek-R1):**
+    *   **Dataset:** `a-m-team/AM-DeepSeek-R1-Distilled-1.4M` (subset `am_0.9M`)
+    *   **Tokenizer:** `Qwen/Qwen2.5-72B-Instruct`
+    *   **Description:** A distilled reasoning dataset from DeepSeek-R1, formatted with ChatML. Includes "thought" chains.
+    *   **Note:** Ingested using a custom raw JSONL/Parquet pipeline to handle schema complexities.
+
 ## Building from Source
 
 `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`
