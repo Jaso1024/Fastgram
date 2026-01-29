@@ -53,6 +53,34 @@ def _infer_max_context_len(tok, model) -> int:
     return min(vals) if vals else 4096
 
 
+def _generate_raw(
+    *,
+    model,
+    input_ids,
+    pad_token_id: int,
+    eos_token_id: int,
+    max_new: int,
+    topk: int,
+    temperature: float,
+):
+    import torch
+
+    m = model.module if hasattr(model, "module") else model
+    m.eval()
+    with torch.no_grad():
+        out = m.generate(
+            input_ids=input_ids,
+            do_sample=True,
+            top_k=int(topk),
+            temperature=float(temperature),
+            max_new_tokens=min(int(max_new), 1024),
+            pad_token_id=int(pad_token_id),
+            eos_token_id=int(eos_token_id),
+        )
+    m.train()
+    return out
+
+
 def _ddp_env() -> tuple[int, int, int]:
     rank = int(os.environ.get("RANK", "0"))
     world = int(os.environ.get("WORLD_SIZE", "1"))
@@ -82,6 +110,7 @@ def main() -> int:
     p.add_argument("--steps", type=int, default=1000)
     p.add_argument("--batch-size", type=int, default=1)
     p.add_argument("--group-size", type=int, default=8)
+    p.add_argument("--decode-mode", choices=["gram", "model"], default="gram")
     p.add_argument("--accept-bonus", type=float, default=0.0)
     p.add_argument("--draft-k", type=int, default=16)
     p.add_argument("--max-support", type=int, default=500)
@@ -176,14 +205,16 @@ def main() -> int:
     else:
         token_dtype = "u32"
 
-    engine = GramEngine(
-        index_dir=args.index_dir,
-        eos_token_id=int(eos),
-        vocab_size=int(vocab),
-        version=4,
-        token_dtype=token_dtype,
-        threads=0,
-    )
+    engine = None
+    if str(args.decode_mode) == "gram":
+        engine = GramEngine(
+            index_dir=args.index_dir,
+            eos_token_id=int(eos),
+            vocab_size=int(vocab),
+            version=4,
+            token_dtype=token_dtype,
+            threads=0,
+        )
 
     ds = load_dataset("gsm8k", "main", split="train")
     opt = torch.optim.AdamW(model.parameters(), lr=float(args.lr))
@@ -215,29 +246,43 @@ def main() -> int:
             for g in range(int(args.group_size)):
                 seed = (int(args.seed) if int(args.seed) != 0 else 0) + step * 100000 + b * 1000 + g
                 input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=device)
-                out_ids, stats = gram_decode(
-                    model=model,
-                    tokenizer=tok,
-                    engine=engine,
-                    input_ids=input_ids,
-                    max_new_tokens=int(max_new),
-                    draft_k=int(args.draft_k),
-                    max_support=int(args.max_support),
-                    draft_mode="infgram",
-                    draft_sample=True,
-                    draft_topk=int(args.draft_topk),
-                    draft_temperature=float(args.draft_temperature),
-                    draft_seed=int(seed),
-                    gate=args.gate,
-                    gate_topk=int(args.gate_topk),
-                    gate_margin=float(args.gate_margin),
-                    gate_prob=float(args.gate_prob),
-                    reject_mode=args.reject_mode,
-                    target_topk=int(args.target_topk),
-                    target_temperature=float(args.target_temperature),
-                    add_one_when_all_accepted=True,
-                    raw_engine=False,
-                )
+                if str(args.decode_mode) == "gram":
+                    out_ids, stats = gram_decode(
+                        model=model,
+                        tokenizer=tok,
+                        engine=engine,
+                        input_ids=input_ids,
+                        max_new_tokens=int(max_new),
+                        draft_k=int(args.draft_k),
+                        max_support=int(args.max_support),
+                        draft_mode="infgram",
+                        draft_sample=True,
+                        draft_topk=int(args.draft_topk),
+                        draft_temperature=float(args.draft_temperature),
+                        draft_seed=int(seed),
+                        gate=args.gate,
+                        gate_topk=int(args.gate_topk),
+                        gate_margin=float(args.gate_margin),
+                        gate_prob=float(args.gate_prob),
+                        reject_mode=args.reject_mode,
+                        target_topk=int(args.target_topk),
+                        target_temperature=float(args.target_temperature),
+                        add_one_when_all_accepted=True,
+                        raw_engine=False,
+                    )
+                else:
+                    from gram_decoding.decoding import GramDecodingStats
+
+                    stats = GramDecodingStats()
+                    out_ids = _generate_raw(
+                        model=model,
+                        input_ids=input_ids,
+                        pad_token_id=int(tok.pad_token_id),
+                        eos_token_id=int(tok.eos_token_id),
+                        max_new=int(max_new),
+                        topk=int(args.target_topk),
+                        temperature=float(args.target_temperature),
+                    )
                 full = out_ids[0].tolist()
                 text = tok.decode(full[prompt_len:], skip_special_tokens=True)
                 task_r = gsm8k_reward(completion_text=text, answer_text=ex["answer"])
