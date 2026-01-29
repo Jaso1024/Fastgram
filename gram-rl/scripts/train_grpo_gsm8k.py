@@ -46,6 +46,11 @@ def main() -> int:
     p.add_argument("--index-gcs", default="gs://fastgram-indices-jaso1024/reasoning")
     p.add_argument("--index-dir", default="index/reasoning")
     p.add_argument("--sync-index", action="store_true", default=False)
+    p.add_argument("--wandb", action="store_true", default=False)
+    p.add_argument("--wandb-project", default="fastgram-rl")
+    p.add_argument("--wandb-entity", default="")
+    p.add_argument("--wandb-name", default="")
+    p.add_argument("--wandb-tags", default="")
     p.add_argument("--steps", type=int, default=1000)
     p.add_argument("--batch-size", type=int, default=1)
     p.add_argument("--group-size", type=int, default=8)
@@ -83,6 +88,19 @@ def main() -> int:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch_dtype = torch.bfloat16 if device.type == "cuda" else torch.float32
 
+    wandb_run = None
+    if args.wandb:
+        import wandb
+
+        tags = [t.strip() for t in str(args.wandb_tags).split(",") if t.strip()]
+        wandb_run = wandb.init(
+            project=str(args.wandb_project),
+            entity=(str(args.wandb_entity) if str(args.wandb_entity) else None),
+            name=(str(args.wandb_name) if str(args.wandb_name) else None),
+            config=vars(args),
+            tags=tags if tags else None,
+        )
+
     if args.sync_index:
         sync_index_from_gcs(gcs_uri=args.index_gcs, local_dir=args.index_dir)
 
@@ -90,11 +108,11 @@ def main() -> int:
     if tok.pad_token_id is None and tok.eos_token_id is not None:
         tok.pad_token = tok.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch_dtype, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch_dtype, trust_remote_code=True)
     model.to(device)
     model.train()
 
-    ref = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch_dtype, trust_remote_code=True)
+    ref = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch_dtype, trust_remote_code=True)
     ref.to(device)
     ref.eval()
     for p_ in ref.parameters():
@@ -137,6 +155,7 @@ def main() -> int:
         all_prompt_lens: list[int] = []
         all_rewards: list[float] = []
         all_groups: list[int] = []
+        totals = {"proposed": 0, "accepted": 0, "target_tokens": 0}
 
         for b, ex in enumerate(batch):
             prompt_text = _make_chat_prompt(tok, ex["question"])
@@ -145,7 +164,7 @@ def main() -> int:
             for g in range(int(args.group_size)):
                 seed = (int(args.seed) if int(args.seed) != 0 else 0) + step * 100000 + b * 1000 + g
                 input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=device)
-                out_ids, _stats = gram_decode(
+                out_ids, stats = gram_decode(
                     model=model,
                     tokenizer=tok,
                     engine=engine,
@@ -171,6 +190,9 @@ def main() -> int:
                 full = out_ids[0].tolist()
                 text = tok.decode(full[prompt_len:], skip_special_tokens=True)
                 r = gsm8k_reward(completion_text=text, answer_text=ex["answer"])
+                totals["proposed"] += int(stats.proposed)
+                totals["accepted"] += int(stats.accepted)
+                totals["target_tokens"] += int(stats.target_tokens)
                 all_seqs.append(full)
                 all_prompt_lens.append(prompt_len)
                 all_rewards.append(float(r))
@@ -230,10 +252,28 @@ def main() -> int:
 
         elapsed = time.perf_counter() - t0
         mean_r = sum(all_rewards) / max(1, len(all_rewards))
+        acc_rate = (totals["accepted"] / totals["proposed"]) if totals["proposed"] else 0.0
         print(
             f"step {step} loss {float(loss_obj.loss.item()):.4f} policy {float(loss_obj.policy_loss.item()):.4f} kl {float(loss_obj.kl_loss.item()):.4f} "
             f"reward {mean_r:.3f} elapsed {elapsed:.1f}s"
         )
+        if wandb_run is not None:
+            log = {
+                "step": step,
+                "loss": float(loss_obj.loss.item()),
+                "policy_loss": float(loss_obj.policy_loss.item()),
+                "kl_loss": float(loss_obj.kl_loss.item()),
+                "reward_mean": float(mean_r),
+                "draft_proposed": totals["proposed"],
+                "draft_accepted": totals["accepted"],
+                "draft_acceptance_rate": float(acc_rate),
+                "target_tokens": totals["target_tokens"],
+                "elapsed_sec": float(elapsed),
+            }
+            if device.type == "cuda":
+                log["gpu_mem_allocated_gb"] = float(torch.cuda.memory_allocated() / (1024**3))
+                log["gpu_mem_reserved_gb"] = float(torch.cuda.memory_reserved() / (1024**3))
+            wandb_run.log(log, step=step)
 
         step += 1
         if int(args.save_every) > 0 and step % int(args.save_every) == 0:
@@ -246,6 +286,8 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(out)
     tok.save_pretrained(out)
+    if wandb_run is not None:
+        wandb_run.finish()
     return 0
 
 
