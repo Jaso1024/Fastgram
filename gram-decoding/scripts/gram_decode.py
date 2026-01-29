@@ -44,7 +44,7 @@ def main() -> int:
     p.add_argument("--raw-engine", action="store_true", default=False)
     p.add_argument("--device", default="")
     p.add_argument("--dtype", default="auto", choices=["auto", "float32", "float16", "bfloat16"])
-    p.add_argument("--gate", choices=["none", "attn", "topk", "margin", "prob"], default="none")
+    p.add_argument("--gate", choices=["none", "attn", "spec", "topk", "margin", "prob"], default="none")
     p.add_argument("--gate-topk", type=int, default=10)
     p.add_argument("--gate-margin", type=float, default=2.0)
     p.add_argument("--gate-prob", type=float, default=0.1)

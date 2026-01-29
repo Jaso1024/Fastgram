@@ -42,7 +42,7 @@ def _sample_from_logits(logits, *, topk: int, temperature: float) -> int:
 
 def _accept_by_gate(
     *,
-    gate: Literal["none", "attn", "topk", "margin", "prob"],
+    gate: Literal["none", "attn", "spec", "topk", "margin", "prob"],
     gate_topk: int,
     gate_margin: float,
     gate_prob: float,
@@ -53,6 +53,8 @@ def _accept_by_gate(
 
     if gate == "none":
         return int(torch.argmax(logits_pos, dim=-1).item()) == int(draft_id)
+    if gate == "spec":
+        raise RuntimeError("spec gate is handled separately")
     if gate == "topk":
         if gate_topk <= 0:
             raise ValueError("gate_topk must be > 0")
@@ -91,7 +93,7 @@ def gram_decode(
     draft_seed: Optional[int] = None,
     add_one_when_all_accepted: bool = True,
     raw_engine: bool = False,
-    gate: Literal["none", "attn", "topk", "margin", "prob"] = "none",
+    gate: Literal["none", "attn", "spec", "topk", "margin", "prob"] = "none",
     gate_topk: int = 10,
     gate_margin: float = 2.0,
     gate_prob: float = 0.1,
@@ -200,7 +202,11 @@ def gram_decode(
                 cur_ids = torch.cat([cur_ids, torch.tensor([[target_next]], device=device, dtype=cur_ids.dtype)], dim=1)
                 prefix_ids.append(target_next)
                 break
-            if gate != "attn":
+            if gate == "spec":
+                if target_next == int(draft_id):
+                    stats.accepted += 1
+                    continue
+            elif gate != "attn":
                 if _accept_by_gate(
                     gate=gate,
                     gate_topk=int(gate_topk),

@@ -75,7 +75,7 @@ def main() -> int:
     p.add_argument("--max-support", type=int, default=500)
     p.add_argument("--draft-topk", type=int, default=50)
     p.add_argument("--draft-temperature", type=float, default=1.0)
-    p.add_argument("--gate", choices=["none", "topk", "margin", "prob"], default="margin")
+    p.add_argument("--gate", choices=["none", "spec", "topk", "margin", "prob"], default="margin")
     p.add_argument("--gate-topk", type=int, default=20)
     p.add_argument("--gate-margin", type=float, default=2.0)
     p.add_argument("--gate-prob", type=float, default=0.1)
