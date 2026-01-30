@@ -25,15 +25,16 @@ from transformers import AutoTokenizer
 # ============================================================================
 
 def format_openthoughts(item: dict) -> str:
-    """Format OpenThoughts3 conversation to training text."""
+    """Format OpenThoughts conversation to training text."""
     convs = item.get("conversations", [])
     parts = []
     for msg in convs:
         role = msg.get("from", "")
         content = msg.get("value", "")
-        if role == "human":
+        # Handle both OpenThoughts3 (human/gpt) and OpenThoughts2 (user/assistant)
+        if role in ("human", "user"):
             parts.append(f"<|im_start|>user\n{content}<|im_end|>")
-        elif role == "gpt":
+        elif role in ("gpt", "assistant"):
             parts.append(f"<|im_start|>assistant\n{content}<|im_end|>")
     return "\n".join(parts)
 
