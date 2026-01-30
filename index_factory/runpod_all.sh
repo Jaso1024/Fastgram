@@ -31,13 +31,14 @@ python3 ingest_single.py --dataset fineweb --limit 8000000 --output-dir ~/index/
 wait
 echo "=== PARALLEL INGEST DONE: $(date) ==="
 
-# Build tables (memory bound, run sequentially)
-echo "=== TABLE BUILDS START: $(date) ==="
-for ds in magpie tulu openthoughts fineweb; do
-    echo "Building $ds table..."
-    RAM_CAP=200000000000 ./build_table.sh ~/index/$ds
-done
-echo "=== TABLE BUILDS DONE: $(date) ==="
+# Build tables in parallel (1TB RAM = ~250GB each)
+echo "=== PARALLEL TABLE BUILDS START: $(date) ==="
+RAM_CAP=250000000000 ./build_table.sh ~/index/magpie &
+RAM_CAP=250000000000 ./build_table.sh ~/index/tulu &
+RAM_CAP=250000000000 ./build_table.sh ~/index/openthoughts &
+RAM_CAP=250000000000 ./build_table.sh ~/index/fineweb &
+wait
+echo "=== PARALLEL TABLE BUILDS DONE: $(date) ==="
 
 echo ""
 echo "============================================"
