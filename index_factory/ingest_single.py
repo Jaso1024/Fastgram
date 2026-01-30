@@ -63,9 +63,9 @@ def format_magpie(item: dict) -> str:
     return f"<|im_start|>user\n{instruction}<|im_end|>\n<|im_start|>assistant\n{response}<|im_end|>"
 
 
-def format_text(item: dict) -> str:
+def format_text(item: dict, text_field: str = "text") -> str:
     """Format plain text field."""
-    return item.get("text", "")
+    return item.get(text_field, "")
 
 
 # ============================================================================
@@ -73,11 +73,18 @@ def format_text(item: dict) -> str:
 # ============================================================================
 
 DATASETS = {
+    # Reasoning datasets
     "openthoughts": {
         "hf_id": "open-thoughts/OpenThoughts3-1.2M",
         "formatter": format_openthoughts,
         "default_limit": None,
     },
+    "openthoughts2": {
+        "hf_id": "open-thoughts/OpenThoughts2-1M",
+        "formatter": format_openthoughts,
+        "default_limit": None,
+    },
+    # Instruction datasets
     "tulu": {
         "hf_id": "allenai/tulu-3-sft-mixture",
         "formatter": format_messages,
@@ -88,7 +95,29 @@ DATASETS = {
         "formatter": format_magpie,
         "default_limit": None,
     },
+    # Code datasets
+    "github-code": {
+        "hf_id": "codeparrot/github-code",
+        "formatter": format_text,
+        "text_field": "code",
+        "default_limit": 5_000_000,
+        "min_length": 50,
+    },
+    "github-code-2025": {
+        "hf_id": "nick007x/github-code-2025",
+        "formatter": format_text,
+        "default_limit": 2_000_000,
+        "min_length": 50,
+    },
+    # Web/general datasets
     "fineweb": {
+        "hf_id": "HuggingFaceFW/fineweb-edu",
+        "hf_name": "sample-10BT",
+        "formatter": format_text,
+        "default_limit": 20_000_000,
+        "min_length": 100,
+    },
+    "fineweb-small": {
         "hf_id": "HuggingFaceFW/fineweb-edu",
         "hf_name": "sample-10BT",
         "formatter": format_text,
@@ -105,6 +134,7 @@ def iter_dataset(dataset_key: str, limit: Optional[int] = None) -> Iterator[str]
     hf_name = cfg.get("hf_name")
     formatter = cfg["formatter"]
     min_length = cfg.get("min_length", 0)
+    text_field = cfg.get("text_field", "text")
 
     if limit is None:
         limit = cfg.get("default_limit")
@@ -119,7 +149,11 @@ def iter_dataset(dataset_key: str, limit: Optional[int] = None) -> Iterator[str]
 
     count = 0
     for item in ds:
-        text = formatter(item)
+        # Handle text_field for format_text
+        if formatter == format_text:
+            text = formatter(item, text_field)
+        else:
+            text = formatter(item)
         if text and len(text) >= min_length:
             yield text
             count += 1
