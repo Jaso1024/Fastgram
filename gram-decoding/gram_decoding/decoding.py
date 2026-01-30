@@ -14,6 +14,10 @@ class GramDecodingStats:
     accepted: int = 0
     proposed: int = 0
     target_tokens: int = 0
+    # For probe-based gating: log probs of accept decisions
+    probe_log_probs: Optional[list[float]] = None
+    probe_accepts: Optional[list[bool]] = None
+    probe_positions: Optional[list[int]] = None  # positions in sequence where probe decided
 
 
 def _attn_importance_scores(attentions, draft_start: int, draft_len: int) -> "torch.Tensor":
@@ -93,7 +97,7 @@ def gram_decode(
     draft_seed: Optional[int] = None,
     add_one_when_all_accepted: bool = True,
     raw_engine: bool = False,
-    gate: Literal["none", "attn", "spec", "topk", "margin", "prob"] = "none",
+    gate: Literal["none", "attn", "spec", "topk", "margin", "prob", "probe"] = "none",
     gate_topk: int = 10,
     gate_margin: float = 2.0,
     gate_prob: float = 0.1,
@@ -101,6 +105,9 @@ def gram_decode(
     reject_mode: Literal["greedy", "sample"] = "greedy",
     target_topk: int = 0,
     target_temperature: float = 1.0,
+    accept_probe: Optional["torch.nn.Module"] = None,
+    probe_deterministic: bool = False,
+    probe_threshold: float = 0.5,
 ) -> tuple["torch.Tensor", GramDecodingStats]:
     import torch
 
@@ -116,8 +123,14 @@ def gram_decode(
         raise ValueError("attn_threshold must be > 0")
     if reject_mode not in ("greedy", "sample"):
         raise ValueError("unknown reject_mode")
+    if gate == "probe" and accept_probe is None:
+        raise ValueError("accept_probe must be provided when gate='probe'")
 
     stats = GramDecodingStats()
+    if gate == "probe":
+        stats.probe_log_probs = []
+        stats.probe_accepts = []
+        stats.probe_positions = []
     device = input_ids.device
 
     cur_ids = input_ids
@@ -170,12 +183,15 @@ def gram_decode(
             continue
 
         draft_tensor = torch.tensor([draft_ids], dtype=cur_ids.dtype, device=device)
+        need_hidden = gate == "probe"
         with torch.no_grad():
             out = model(
                 torch.cat([cur_ids, draft_tensor], dim=1),
                 output_attentions=(gate == "attn"),
+                output_hidden_states=need_hidden,
             )
             logits = out.logits
+            hidden_states = out.hidden_states[-1] if need_hidden else None
 
         gate_idx: Optional[int] = None
         if gate == "attn":
@@ -202,13 +218,35 @@ def gram_decode(
                 cur_ids = torch.cat([cur_ids, torch.tensor([[target_next]], device=device, dtype=cur_ids.dtype)], dim=1)
                 prefix_ids.append(target_next)
                 break
-            if gate == "spec":
+
+            # Probe-based gating
+            if gate == "probe":
+                assert accept_probe is not None and hidden_states is not None
+                assert stats.probe_log_probs is not None
+                assert stats.probe_accepts is not None
+                assert stats.probe_positions is not None
+                h = hidden_states[0, pos, :].unsqueeze(0)  # [1, H]
+                probe_out = accept_probe(h, deterministic=probe_deterministic, threshold=probe_threshold)
+                accept_decision = bool(probe_out.accept.item())
+                stats.probe_log_probs.append(float(probe_out.log_prob.item()))
+                stats.probe_accepts.append(accept_decision)
+                stats.probe_positions.append(pos)
+                if accept_decision and target_next == int(draft_id):
+                    stats.accepted += 1
+                    continue
+                # Probe rejected or draft doesn't match target
+                accepted_all = False
+                stats.target_tokens += 1
+                cur_ids = torch.cat([cur_ids, torch.tensor([[target_next]], device=device, dtype=cur_ids.dtype)], dim=1)
+                prefix_ids.append(target_next)
+                break
+            elif gate == "spec":
                 if target_next == int(draft_id):
                     stats.accepted += 1
                     continue
-            elif gate != "attn":
+            elif gate not in ("attn", "probe"):
                 if _accept_by_gate(
-                    gate=gate,
+                    gate=gate,  # type: ignore
                     gate_topk=int(gate_topk),
                     gate_margin=float(gate_margin),
                     gate_prob=float(gate_prob),

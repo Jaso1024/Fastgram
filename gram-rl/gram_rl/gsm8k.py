@@ -11,6 +11,10 @@ def gsm8k_format_instruction(style: str) -> str:
     s = str(style)
     if s == "hash4":
         return "Give the final answer on its own line as: #### <number>"
+    if s == "cot":
+        return "Think through this step by step, showing your reasoning. Then give the final answer as: #### <number>"
+    if s == "deepseek":
+        return "Let me work through this problem step by step.\n\nFirst, I need to understand what the problem is asking."
     if s == "none":
         return ""
     raise ValueError("unknown format style")
@@ -36,7 +40,8 @@ def _norm_num(s: str) -> str:
 
 def gsm8k_parse_answer(*, completion_text: str, style: str) -> tuple[Optional[str], bool]:
     s = str(style)
-    if s == "hash4":
+    if s in ("hash4", "cot", "deepseek"):
+        # All these styles expect #### <number> format
         if "####" not in completion_text:
             return None, False
         tail = completion_text.rsplit("####", 1)[-1]

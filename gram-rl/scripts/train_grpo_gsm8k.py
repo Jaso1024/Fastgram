@@ -19,6 +19,7 @@ from gram_rl.gcs import sync_index_from_gcs
 from gram_rl.gsm8k import gsm8k_format_instruction, gsm8k_prompt, gsm8k_reward, gsm8k_reward_components
 from gram_rl.grpo import grpo_loss
 from gram_rl.logprobs import pad_batch, token_logprobs_for_completions
+from gram_rl.probe import AcceptProbe, create_probe_for_model
 
 
 def _adv_from_group(rewards: list[float], eps: float = 1e-6) -> list[float]:
@@ -114,17 +115,19 @@ def main() -> int:
     p.add_argument("--group-size", type=int, default=8)
     p.add_argument("--decode-mode", choices=["gram", "model"], default="gram")
     p.add_argument("--accept-bonus", type=float, default=0.0)
-    p.add_argument("--answer-format", choices=["none", "hash4"], default="none")
+    p.add_argument("--answer-format", choices=["none", "hash4", "cot", "deepseek"], default="none")
     p.add_argument("--format-weight", type=float, default=0.0)
     p.add_argument("--format-instruction", default="")
     p.add_argument("--draft-k", type=int, default=16)
     p.add_argument("--max-support", type=int, default=500)
     p.add_argument("--draft-topk", type=int, default=50)
     p.add_argument("--draft-temperature", type=float, default=1.0)
-    p.add_argument("--gate", choices=["none", "spec", "topk", "margin", "prob"], default="margin")
+    p.add_argument("--gate", choices=["none", "spec", "topk", "margin", "prob", "probe"], default="margin")
     p.add_argument("--gate-topk", type=int, default=20)
     p.add_argument("--gate-margin", type=float, default=2.0)
     p.add_argument("--gate-prob", type=float, default=0.1)
+    p.add_argument("--probe-lr", type=float, default=1e-4, help="Learning rate for accept probe")
+    p.add_argument("--probe-weight", type=float, default=1.0, help="Weight for probe policy gradient loss")
     p.add_argument("--reject-mode", choices=["greedy", "sample"], default="sample")
     p.add_argument("--target-topk", type=int, default=50)
     p.add_argument("--target-temperature", type=float, default=0.8)
@@ -225,6 +228,16 @@ def main() -> int:
             threads=0,
         )
 
+    # Initialize accept probe if using probe gate
+    accept_probe = None
+    probe_opt = None
+    if str(args.gate) == "probe":
+        base_model = model.module if hasattr(model, "module") else model
+        accept_probe = create_probe_for_model(base_model)
+        accept_probe.to(device=device, dtype=torch_dtype)  # Match model dtype
+        accept_probe.train()
+        probe_opt = torch.optim.AdamW(accept_probe.parameters(), lr=float(args.probe_lr))
+
     ds = load_dataset("gsm8k", "main", split="train")
     opt = torch.optim.AdamW(model.parameters(), lr=float(args.lr))
     max_ctx = _infer_max_context_len(tok, model.module if hasattr(model, "module") else model)
@@ -250,6 +263,9 @@ def main() -> int:
         all_bonus_rewards: list[float] = []
         all_format_rewards: list[float] = []
         all_groups: list[int] = []
+        all_probe_log_probs: list[list[float]] = []  # probe log probs per sample
+        all_probe_positions: list[list[int]] = []  # positions where probe decided
+        all_probe_accepts: list[list[bool]] = []  # probe accept decisions
         totals = {"proposed": 0, "accepted": 0, "target_tokens": 0}
 
         for b, ex in enumerate(batch):
@@ -283,6 +299,7 @@ def main() -> int:
                         target_temperature=float(args.target_temperature),
                         add_one_when_all_accepted=True,
                         raw_engine=False,
+                        accept_probe=accept_probe,
                     )
                 else:
                     from gram_decoding.decoding import GramDecodingStats
@@ -317,12 +334,19 @@ def main() -> int:
                 all_bonus_rewards.append(float(bonus_r))
                 all_format_rewards.append(float(fmt_r))
                 all_groups.append(b)
+                # Collect probe data if using probe gate
+                if stats.probe_log_probs is not None:
+                    all_probe_log_probs.append(stats.probe_log_probs)
+                    all_probe_positions.append(stats.probe_positions or [])
+                    all_probe_accepts.append(stats.probe_accepts or [])
+                else:
+                    all_probe_log_probs.append([])
+                    all_probe_positions.append([])
+                    all_probe_accepts.append([])
 
-        adv_by_sample: list[float] = []
-        for b in range(len(batch)):
-            rs = [all_rewards[i] for i in range(len(all_rewards)) if all_groups[i] == b]
-            adv = _adv_from_group(rs)
-            adv_by_sample.extend(adv)
+        # Compute advantages across entire batch (not per-question)
+        # This ensures variance even when individual questions have consistent outcomes
+        adv_by_sample = _adv_from_group(all_rewards)
 
         ids_cpu, attn_cpu, pl_cpu = pad_batch(seqs=all_seqs, prompt_lens=all_prompt_lens, pad_token_id=int(tok.pad_token_id))
         ids = ids_cpu.to(device)
@@ -391,6 +415,39 @@ def main() -> int:
                 kl_sum += float(loss_obj.kl_loss.item())
                 upd += 1
 
+        # Update probe if using probe gate
+        probe_loss_sum = 0.0
+        probe_upd = 0
+        if accept_probe is not None and probe_opt is not None and any(len(p) > 0 for p in all_probe_positions):
+            # For each sequence with probe decisions, recompute log probs with gradients
+            for i in range(len(all_seqs)):
+                positions = all_probe_positions[i]
+                accepts = all_probe_accepts[i]
+                if len(positions) == 0:
+                    continue
+                adv_i = adv_by_sample[i]
+                # Forward pass to get hidden states
+                seq_tensor = torch.tensor([all_seqs[i]], dtype=torch.long, device=device)
+                with torch.no_grad():
+                    out = model(seq_tensor, output_hidden_states=True)
+                    hidden = out.hidden_states[-1]  # [1, seq_len, H]
+                # Compute probe log probs for stored positions and actions
+                probe_log_probs_sum = torch.tensor(0.0, device=device)
+                for pos, accept in zip(positions, accepts):
+                    if pos >= hidden.shape[1]:
+                        continue
+                    h = hidden[0, pos, :].unsqueeze(0)  # [1, H]
+                    action = torch.tensor([accept], dtype=torch.bool, device=device)
+                    log_prob = accept_probe.log_prob_of_action(h, action)
+                    probe_log_probs_sum = probe_log_probs_sum + log_prob.squeeze()
+                # REINFORCE: maximize advantage-weighted log prob
+                probe_loss = -float(args.probe_weight) * adv_i * probe_log_probs_sum
+                probe_opt.zero_grad(set_to_none=True)
+                probe_loss.backward()
+                probe_opt.step()
+                probe_loss_sum += float(probe_loss.abs().item())
+                probe_upd += 1
+
         elapsed = time.perf_counter() - t0
         count = max(1, len(all_rewards))
         sums = torch.tensor(
@@ -419,10 +476,12 @@ def main() -> int:
         losses = torch.tensor([loss_sum / denom, policy_sum / denom, kl_sum / denom], dtype=torch.float64, device=device)
         _ddp_reduce(losses, dist.ReduceOp.SUM if world > 1 else None)
         loss_mean, policy_mean, kl_mean = [float(x) / float(world) for x in losses.tolist()]
+        probe_loss_mean = (probe_loss_sum / max(1, probe_upd)) if probe_upd > 0 else 0.0
 
         if is_main:
+            probe_str = f" probe {probe_loss_mean:.4f}" if probe_upd > 0 else ""
             print(
-                f"step {step} loss {loss_mean:.4f} policy {policy_mean:.4f} kl {kl_mean:.4f} "
+                f"step {step} loss {loss_mean:.4f} policy {policy_mean:.4f} kl {kl_mean:.4f}{probe_str} "
                 f"reward {mean_r:.3f} elapsed {elapsed:.1f}s"
             )
         if wandb_run is not None:
@@ -445,6 +504,9 @@ def main() -> int:
             if device.type == "cuda":
                 log["gpu_mem_allocated_gb"] = float(torch.cuda.memory_allocated() / (1024**3))
                 log["gpu_mem_reserved_gb"] = float(torch.cuda.memory_reserved() / (1024**3))
+            if probe_upd > 0:
+                log["probe_loss"] = float(probe_loss_mean)
+                log["probe_updates"] = int(probe_upd)
             wandb_run.log(log, step=step)
 
         step += 1
@@ -455,6 +517,8 @@ def main() -> int:
                 m = model.module if hasattr(model, "module") else model
                 m.save_pretrained(out)
                 tok.save_pretrained(out)
+                if accept_probe is not None:
+                    torch.save(accept_probe.state_dict(), out / "accept_probe.pt")
 
     if world > 1:
         dist.barrier()
@@ -464,6 +528,8 @@ def main() -> int:
         m = model.module if hasattr(model, "module") else model
         m.save_pretrained(out)
         tok.save_pretrained(out)
+        if accept_probe is not None:
+            torch.save(accept_probe.state_dict(), out / "accept_probe.pt")
     if wandb_run is not None:
         wandb_run.finish()
     if world > 1:
