@@ -39,7 +39,7 @@ def format_openthoughts(item: dict) -> str:
 
 
 def format_messages(item: dict) -> str:
-    """Format Tulu-3/Magpie messages to training text."""
+    """Format Tulu-3 messages to training text."""
     msgs = item.get("messages", [])
     parts = []
     for msg in msgs:
@@ -52,6 +52,15 @@ def format_messages(item: dict) -> str:
         elif role == "system":
             parts.append(f"<|im_start|>system\n{content}<|im_end|>")
     return "\n".join(parts)
+
+
+def format_magpie(item: dict) -> str:
+    """Format Magpie instruction/response to training text."""
+    instruction = item.get("instruction", "")
+    response = item.get("response", "")
+    if not instruction or not response:
+        return ""
+    return f"<|im_start|>user\n{instruction}<|im_end|>\n<|im_start|>assistant\n{response}<|im_end|>"
 
 
 def format_text(item: dict) -> str:
@@ -76,7 +85,7 @@ DATASETS = {
     },
     "magpie": {
         "hf_id": "Magpie-Align/Magpie-Qwen2.5-Pro-300K-Filtered",
-        "formatter": format_messages,
+        "formatter": format_magpie,
         "default_limit": None,
     },
     "fineweb": {
