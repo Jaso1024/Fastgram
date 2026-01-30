@@ -16,7 +16,7 @@ def grpo_loss(
     logp_old: "torch.Tensor",
     token_mask: "torch.Tensor",
     advantages: "torch.Tensor",
-    ref_logp: "torch.Tensor",
+    ref_logp: "torch.Tensor | None" = None,
     clip_eps: float,
     kl_beta: float,
     ratio_mode: str = "sequence",
@@ -54,14 +54,17 @@ def grpo_loss(
     else:
         raise ValueError("ratio_mode must be 'sequence', 'sequence_sum', or 'token'")
 
-    log_r = (logp_new - ref_logp)
-    if str(kl_estimator) == "sample":
-        kl_tok = log_r
-    elif str(kl_estimator) == "nonneg":
-        r = torch.exp(log_r)
-        kl_tok = (r - 1.0) - log_r
+    if float(kl_beta) <= 0.0 or ref_logp is None:
+        kl_loss = logp_new.sum() * 0.0
     else:
-        raise ValueError("kl_estimator must be 'nonneg' or 'sample'")
-    kl_loss = (kl_tok[token_mask]).mean() * float(kl_beta)
+        log_r = (logp_new - ref_logp)
+        if str(kl_estimator) == "sample":
+            kl_tok = log_r
+        elif str(kl_estimator) == "nonneg":
+            r = torch.exp(log_r)
+            kl_tok = (r - 1.0) - log_r
+        else:
+            raise ValueError("kl_estimator must be 'nonneg' or 'sample'")
+        kl_loss = (kl_tok[token_mask]).mean() * float(kl_beta)
 
     return GrpoLoss(loss=policy_loss + kl_loss, policy_loss=policy_loss, kl_loss=kl_loss)

@@ -194,11 +194,13 @@ def main() -> int:
     if world > 1:
         model = DDP(model, device_ids=[local_rank] if device.type == "cuda" else None)
 
-    ref = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch_dtype, trust_remote_code=True)
-    ref.to(device)
-    ref.eval()
-    for p_ in ref.parameters():
-        p_.requires_grad_(False)
+    ref = None
+    if float(args.kl_beta) > 0.0:
+        ref = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch_dtype, trust_remote_code=True)
+        ref.to(device)
+        ref.eval()
+        for p_ in ref.parameters():
+            p_.requires_grad_(False)
 
     eos = tok.eos_token_id
     if eos is None:
@@ -336,15 +338,17 @@ def main() -> int:
                 prompt_lens=pl,
                 pad_token_id=int(tok.pad_token_id),
             )
-            ref_lp = token_logprobs_for_completions(
-                model=ref,
-                input_ids=ids,
-                attention_mask=attn,
-                prompt_lens=pl,
-                pad_token_id=int(tok.pad_token_id),
-            )
             old_logp = old.token_logp.detach()
-            ref_logp = ref_lp.token_logp.detach()
+            ref_logp = None
+            if ref is not None:
+                ref_lp = token_logprobs_for_completions(
+                    model=ref,
+                    input_ids=ids,
+                    attention_mask=attn,
+                    prompt_lens=pl,
+                    pad_token_id=int(tok.pad_token_id),
+                )
+                ref_logp = ref_lp.token_logp.detach()
             token_mask = old.token_mask.detach()
 
         bsz = ids.shape[0]
@@ -373,7 +377,7 @@ def main() -> int:
                     logp_old=old_logp.index_select(0, ix),
                     token_mask=token_mask.index_select(0, ix),
                     advantages=adv_t.index_select(0, ix),
-                    ref_logp=ref_logp.index_select(0, ix),
+                    ref_logp=(ref_logp.index_select(0, ix) if ref_logp is not None else None),
                     clip_eps=float(args.clip_eps),
                     kl_beta=float(args.kl_beta),
                     ratio_mode=str(args.ratio_mode),
