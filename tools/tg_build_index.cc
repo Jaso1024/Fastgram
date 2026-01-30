@@ -12,6 +12,12 @@
 
 namespace {
 
+// Safe copy that skips when source == destination
+void SafeCopyFile(const std::filesystem::path& src, const std::filesystem::path& dst) {
+  if (std::filesystem::equivalent(src, dst)) return;
+  std::filesystem::copy_file(src, dst, std::filesystem::copy_options::overwrite_existing);
+}
+
 std::vector<std::uint64_t> ReadU64s(const std::filesystem::path& p) {
   std::ifstream in(p, std::ios::binary);
   if (!in) return {};
@@ -213,18 +219,18 @@ int main(int argc, char** argv) {
     const auto mt_path = in_dir / "metadata.0";
     const auto om_path = in_dir / "metaoff.0";
     const auto ug_path = in_dir / "unigram.0";
-    std::filesystem::copy_file(ds_path, out_dir / "tokenized.0", std::filesystem::copy_options::overwrite_existing);
+    SafeCopyFile(ds_path, out_dir / "tokenized.0");
     if (std::filesystem::exists(od_path)) {
-      std::filesystem::copy_file(od_path, out_dir / "offset.0", std::filesystem::copy_options::overwrite_existing);
+      SafeCopyFile(od_path, out_dir / "offset.0");
     }
     if (std::filesystem::exists(mt_path)) {
-      std::filesystem::copy_file(mt_path, out_dir / "metadata.0", std::filesystem::copy_options::overwrite_existing);
+      SafeCopyFile(mt_path, out_dir / "metadata.0");
     }
     if (std::filesystem::exists(om_path)) {
-      std::filesystem::copy_file(om_path, out_dir / "metaoff.0", std::filesystem::copy_options::overwrite_existing);
+      SafeCopyFile(om_path, out_dir / "metaoff.0");
     }
     if (std::filesystem::exists(ug_path)) {
-      std::filesystem::copy_file(ug_path, out_dir / "unigram.0", std::filesystem::copy_options::overwrite_existing);
+      SafeCopyFile(ug_path, out_dir / "unigram.0");
     }
   }
   const auto t6 = std::chrono::steady_clock::now();
