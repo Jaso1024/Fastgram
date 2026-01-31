@@ -130,7 +130,8 @@ class GramEngine:
         if not self._check_ids(prompt_ids, allow_empty=True):
             return {"error": "prompt_ids must be a list[int]"}
         r = self.engine.primitive_ntd(prompt_ids=prompt_ids, max_support=max_support)
-        out = {int(tok): {"cont_cnt": int(v.cont_cnt), "prob": float(v.prob)} for tok, v in r.result_by_token_id.items()}
+        total = r.prompt_cnt if r.prompt_cnt > 0 else 1
+        out = {int(tok): {"cont_cnt": int(cnt), "prob": float(cnt) / total} for tok, cnt in zip(r.tokens, r.counts)}
         return {"prompt_cnt": r.prompt_cnt, "result_by_token_id": out, "approx": r.approx}
 
     def find_cnf(
@@ -179,7 +180,8 @@ class GramEngine:
         if not self._check_ids(prompt_ids, allow_empty=True):
             return {"error": "prompt_ids must be a list[int]"}
         r = self.engine.ntd(prompt_ids=prompt_ids, max_support=max_support)
-        out = {int(tok): {"cont_cnt": int(v.cont_cnt), "prob": float(v.prob)} for tok, v in r.result_by_token_id.items()}
+        total = r.prompt_cnt if r.prompt_cnt > 0 else 1
+        out = {int(tok): {"cont_cnt": int(cnt), "prob": float(cnt) / total} for tok, cnt in zip(r.tokens, r.counts)}
         return {"prompt_cnt": r.prompt_cnt, "result_by_token_id": out, "approx": r.approx, "suffix_len": r.suffix_len}
 
     def search_docs(
