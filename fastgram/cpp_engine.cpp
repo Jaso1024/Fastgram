@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <random>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -128,6 +129,18 @@ class PyEngine {
 
   gram::Cursor<Token> cursor() const { return engine_->MakeCursor(); }
 
+  std::vector<Token> generate_draft(const std::vector<Token>& prompt_ids, std::size_t n, std::uint64_t seed) {
+    auto cursor = engine_->MakeCursor();
+    for (const auto& tok : prompt_ids) {
+      cursor.Advance(tok);
+      if (cursor.cnt() == 0) {
+        return {};
+      }
+    }
+    std::mt19937_64 rng(seed);
+    return cursor.GenerateDraft(n, rng);
+  }
+
  private:
   std::unique_ptr<gram::Engine<Token>> engine_;
 };
@@ -152,23 +165,22 @@ PYBIND11_MODULE(cpp_engine, m) {
       .def_readwrite("cont_cnt", &gram::ProbResult::cont_cnt)
       .def_readwrite("prob", &gram::ProbResult::prob);
 
-  py::class_<gram::DistTokenResult>(m, "DistTokenResult")
-      .def_readwrite("cont_cnt", &gram::DistTokenResult::cont_cnt)
-      .def_readwrite("prob", &gram::DistTokenResult::prob);
-
   py::class_<gram::DistResult<gram::u8>>(m, "DistResult_U8")
       .def_readwrite("prompt_cnt", &gram::DistResult<gram::u8>::prompt_cnt)
-      .def_readwrite("result_by_token_id", &gram::DistResult<gram::u8>::result_by_token_id)
+      .def_readwrite("tokens", &gram::DistResult<gram::u8>::tokens)
+      .def_readwrite("counts", &gram::DistResult<gram::u8>::counts)
       .def_readwrite("approx", &gram::DistResult<gram::u8>::approx);
 
   py::class_<gram::DistResult<gram::u16>>(m, "DistResult_U16")
       .def_readwrite("prompt_cnt", &gram::DistResult<gram::u16>::prompt_cnt)
-      .def_readwrite("result_by_token_id", &gram::DistResult<gram::u16>::result_by_token_id)
+      .def_readwrite("tokens", &gram::DistResult<gram::u16>::tokens)
+      .def_readwrite("counts", &gram::DistResult<gram::u16>::counts)
       .def_readwrite("approx", &gram::DistResult<gram::u16>::approx);
 
   py::class_<gram::DistResult<gram::u32>>(m, "DistResult_U32")
       .def_readwrite("prompt_cnt", &gram::DistResult<gram::u32>::prompt_cnt)
-      .def_readwrite("result_by_token_id", &gram::DistResult<gram::u32>::result_by_token_id)
+      .def_readwrite("tokens", &gram::DistResult<gram::u32>::tokens)
+      .def_readwrite("counts", &gram::DistResult<gram::u32>::counts)
       .def_readwrite("approx", &gram::DistResult<gram::u32>::approx);
 
   py::class_<gram::InfgramProbResult>(m, "InfgramProbResult")
@@ -179,19 +191,22 @@ PYBIND11_MODULE(cpp_engine, m) {
 
   py::class_<gram::InfgramDistResult<gram::u8>>(m, "InfgramDistResult_U8")
       .def_readwrite("prompt_cnt", &gram::InfgramDistResult<gram::u8>::prompt_cnt)
-      .def_readwrite("result_by_token_id", &gram::InfgramDistResult<gram::u8>::result_by_token_id)
+      .def_readwrite("tokens", &gram::InfgramDistResult<gram::u8>::tokens)
+      .def_readwrite("counts", &gram::InfgramDistResult<gram::u8>::counts)
       .def_readwrite("approx", &gram::InfgramDistResult<gram::u8>::approx)
       .def_readwrite("suffix_len", &gram::InfgramDistResult<gram::u8>::suffix_len);
 
   py::class_<gram::InfgramDistResult<gram::u16>>(m, "InfgramDistResult_U16")
       .def_readwrite("prompt_cnt", &gram::InfgramDistResult<gram::u16>::prompt_cnt)
-      .def_readwrite("result_by_token_id", &gram::InfgramDistResult<gram::u16>::result_by_token_id)
+      .def_readwrite("tokens", &gram::InfgramDistResult<gram::u16>::tokens)
+      .def_readwrite("counts", &gram::InfgramDistResult<gram::u16>::counts)
       .def_readwrite("approx", &gram::InfgramDistResult<gram::u16>::approx)
       .def_readwrite("suffix_len", &gram::InfgramDistResult<gram::u16>::suffix_len);
 
   py::class_<gram::InfgramDistResult<gram::u32>>(m, "InfgramDistResult_U32")
       .def_readwrite("prompt_cnt", &gram::InfgramDistResult<gram::u32>::prompt_cnt)
-      .def_readwrite("result_by_token_id", &gram::InfgramDistResult<gram::u32>::result_by_token_id)
+      .def_readwrite("tokens", &gram::InfgramDistResult<gram::u32>::tokens)
+      .def_readwrite("counts", &gram::InfgramDistResult<gram::u32>::counts)
       .def_readwrite("approx", &gram::InfgramDistResult<gram::u32>::approx)
       .def_readwrite("suffix_len", &gram::InfgramDistResult<gram::u32>::suffix_len);
 
@@ -392,7 +407,13 @@ PYBIND11_MODULE(cpp_engine, m) {
            "delim_ids"_a,
            "min_len"_a,
            "max_cnt"_a,
-           "enforce_bow"_a);
+           "enforce_bow"_a)
+      .def("generate_draft",
+           &PyEngine<gram::u8>::generate_draft,
+           py::call_guard<py::gil_scoped_release>(),
+           "prompt_ids"_a,
+           "n"_a,
+           "seed"_a);
 
   py::class_<PyEngine<gram::u16>>(m, "Engine_U16")
       .def(py::init<const std::vector<std::string>&,
@@ -504,7 +525,13 @@ PYBIND11_MODULE(cpp_engine, m) {
            "delim_ids"_a,
            "min_len"_a,
            "max_cnt"_a,
-           "enforce_bow"_a);
+           "enforce_bow"_a)
+      .def("generate_draft",
+           &PyEngine<gram::u16>::generate_draft,
+           py::call_guard<py::gil_scoped_release>(),
+           "prompt_ids"_a,
+           "n"_a,
+           "seed"_a);
 
   py::class_<PyEngine<gram::u32>>(m, "Engine_U32")
       .def(py::init<const std::vector<std::string>&,
@@ -616,5 +643,11 @@ PYBIND11_MODULE(cpp_engine, m) {
            "delim_ids"_a,
            "min_len"_a,
            "max_cnt"_a,
-           "enforce_bow"_a);
+           "enforce_bow"_a)
+      .def("generate_draft",
+           &PyEngine<gram::u32>::generate_draft,
+           py::call_guard<py::gil_scoped_release>(),
+           "prompt_ids"_a,
+           "n"_a,
+           "seed"_a);
 }

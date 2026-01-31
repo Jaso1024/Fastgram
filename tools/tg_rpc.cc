@@ -180,7 +180,7 @@ int Run(const Args& args) {
         }
         ParseTokenVec<Token>(fields, 3, n, &ids);
         const auto r = engine.Ntd(ids, max_support);
-        std::cout << "ntd " << r.prompt_cnt << " " << (r.approx ? 1 : 0) << " " << r.result_by_token_id.size() << "\n";
+        std::cout << "ntd " << r.prompt_cnt << " " << (r.approx ? 1 : 0) << " " << r.tokens.size() << "\n";
         continue;
       }
       std::cout << "error unknown_op\n";
