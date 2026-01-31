@@ -273,6 +273,8 @@ def main() -> int:
         all_sequences: list[list[int]] = []
         all_prompt_lens: list[int] = []
         all_rewards: list[float] = []
+        all_reward_components: list[dict] = []
+        all_completion_lens: list[int] = []
         all_groups: list[int] = []
 
         for prompt_idx, example in enumerate(examples):
@@ -305,6 +307,8 @@ def main() -> int:
                 all_sequences.append(full_seq)
                 all_prompt_lens.append(prompt_len)
                 all_rewards.append(reward_output.total)
+                all_reward_components.append(reward_output.components)
+                all_completion_lens.append(len(completion_ids))
                 all_groups.append(prompt_idx)
 
         # Compute advantages
@@ -365,6 +369,13 @@ def main() -> int:
             kl_loss_sum += output.kl_loss.item()
             num_updates += 1
 
+        # Compute local statistics
+        correctness_rewards = [c.get("correctness", 0.0) for c in all_reward_components]
+        format_rewards = [c.get("format", 0.0) for c in all_reward_components]
+        mean_completion_len = sum(all_completion_lens) / max(len(all_completion_lens), 1)
+        max_completion_len = max(all_completion_lens) if all_completion_lens else 0
+        min_completion_len = min(all_completion_lens) if all_completion_lens else 0
+
         # Aggregate metrics across processes
         metrics = gather_scalars(
             [
@@ -374,15 +385,28 @@ def main() -> int:
                 policy_loss_sum,
                 kl_loss_sum,
                 num_updates,
+                sum(correctness_rewards),
+                sum(format_rewards),
+                sum(all_completion_lens),
             ],
             device=device,
         )
-        reward_sum, count, loss_agg, policy_agg, kl_agg, updates_agg = metrics.tolist()
+        (reward_sum, count, loss_agg, policy_agg, kl_agg, updates_agg,
+         correctness_sum, format_sum, completion_len_sum) = metrics.tolist()
 
         mean_reward = reward_sum / max(count, 1)
         mean_loss = loss_agg / max(updates_agg, 1)
         mean_policy_loss = policy_agg / max(updates_agg, 1)
         mean_kl_loss = kl_agg / max(updates_agg, 1)
+        mean_correctness = correctness_sum / max(count, 1)
+        mean_format = format_sum / max(count, 1)
+        avg_completion_len = completion_len_sum / max(count, 1)
+
+        # Advantage statistics
+        adv_mean = sum(advantages) / max(len(advantages), 1)
+        adv_std = (sum((a - adv_mean) ** 2 for a in advantages) / max(len(advantages), 1)) ** 0.5
+        adv_min = min(advantages) if advantages else 0.0
+        adv_max = max(advantages) if advantages else 0.0
 
         step_time = time.perf_counter() - step_start
         total_time = time.perf_counter() - t0
@@ -395,21 +419,43 @@ def main() -> int:
                 f"policy {mean_policy_loss:.4f} | "
                 f"kl {mean_kl_loss:.4f} | "
                 f"reward {mean_reward:.3f} | "
+                f"correct {mean_correctness:.3f} | "
                 f"time {step_time:.1f}s"
             )
 
         if wandb_run is not None:
             log_dict = {
-                "step": step + 1,
-                "loss": mean_loss,
-                "policy_loss": mean_policy_loss,
-                "kl_loss": mean_kl_loss,
-                "reward": mean_reward,
-                "step_time": step_time,
-                "total_time": total_time,
+                # Core metrics
+                "train/loss": mean_loss,
+                "train/policy_loss": mean_policy_loss,
+                "train/kl_loss": mean_kl_loss,
+                # Rewards
+                "reward/total": mean_reward,
+                "reward/correctness": mean_correctness,
+                "reward/format": mean_format,
+                "reward/min": min(all_rewards) if all_rewards else 0.0,
+                "reward/max": max(all_rewards) if all_rewards else 0.0,
+                # Advantages
+                "advantage/mean": adv_mean,
+                "advantage/std": adv_std,
+                "advantage/min": adv_min,
+                "advantage/max": adv_max,
+                # Generation stats
+                "generation/completion_len_mean": avg_completion_len,
+                "generation/completion_len_local_max": max_completion_len,
+                "generation/completion_len_local_min": min_completion_len,
+                "generation/num_samples": int(count),
+                # Algorithm diagnostics
+                "algorithm/clip_fraction": output.clip_fraction,
+                "algorithm/mean_ratio": output.mean_ratio,
+                # Timing
+                "timing/step_time": step_time,
+                "timing/total_time": total_time,
+                "timing/samples_per_sec": count / max(step_time, 0.001),
             }
             if device.type == "cuda":
-                log_dict["gpu_mem_gb"] = torch.cuda.memory_allocated() / (1024**3)
+                log_dict["system/gpu_mem_gb"] = torch.cuda.memory_allocated() / (1024**3)
+                log_dict["system/gpu_mem_reserved_gb"] = torch.cuda.memory_reserved() / (1024**3)
             wandb_run.log(log_dict, step=step + 1)
 
         # Checkpointing
