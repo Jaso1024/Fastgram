@@ -121,6 +121,10 @@ class Cursor {
   FindResult Advance(Token next_token_id);
   DistResult<Token> AdvanceNtd(Token next_token_id, u64 max_support);
 
+  // O(1) sampling - directly samples from suffix array without computing distribution
+  Token SampleOne(std::mt19937_64& rng) const;
+  std::vector<Token> GenerateDraft(std::size_t n, std::mt19937_64& rng);
+
  private:
   const Engine<Token>* engine_ = nullptr;
   std::vector<std::pair<u64, u64>> segment_by_shard_;

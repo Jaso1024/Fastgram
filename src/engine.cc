@@ -179,6 +179,48 @@ DistResult<Token> Cursor<Token>::AdvanceNtd(Token next_token_id, u64 max_support
 }
 
 template <typename Token>
+Token Cursor<Token>::SampleOne(std::mt19937_64& rng) const {
+  if (cnt_ == 0) {
+    return 0;
+  }
+  // Pick a random position in [0, cnt_)
+  std::uniform_int_distribution<u64> uniform(0, cnt_ - 1);
+  u64 r = uniform(rng);
+
+  // Find which shard contains this position
+  u64 cumsum = 0;
+  for (std::size_t s = 0; s < segment_by_shard_.size(); s++) {
+    const auto& seg = segment_by_shard_[s];
+    u64 seg_size = seg.second - seg.first;
+    if (r < cumsum + seg_size) {
+      // This shard contains position r - directly lookup from suffix array
+      u64 rank = seg.first + (r - cumsum);
+      const auto& shard = engine_->ShardAt(s);
+      u64 ptr = engine_->ConvertRankToPtr(shard, rank);
+      u64 next_ptr = (engine_->Version() == 4) ? (ptr + num_bytes_) : (ptr - sizeof(Token));
+      return engine_->ConvertPtrToTokenId(shard, next_ptr);
+    }
+    cumsum += seg_size;
+  }
+  return 0;
+}
+
+template <typename Token>
+std::vector<Token> Cursor<Token>::GenerateDraft(std::size_t n, std::mt19937_64& rng) {
+  std::vector<Token> tokens;
+  tokens.reserve(n);
+  for (std::size_t i = 0; i < n; i++) {
+    if (cnt_ == 0) {
+      break;
+    }
+    Token tok = SampleOne(rng);
+    tokens.push_back(tok);
+    Advance(tok);
+  }
+  return tokens;
+}
+
+template <typename Token>
 Engine<Token>::Engine(Index index, EngineOptions opts) : index_(std::move(index)), opts_(std::move(opts)) {
   CheckLittleEndian();
   if (index_.cfg().token_width != sizeof(Token)) {
@@ -587,7 +629,6 @@ DistResult<Token> Engine<Token>::NtdFromSegment(std::size_t num_bytes,
   merged.reserve(std::min(static_cast<std::size_t>(max_support * 4), static_cast<std::size_t>(20000)));
 
   if (!use_pool) {
-    // Single-threaded: directly accumulate into merged map
     for (std::size_t s = 0; s < num_shards(); s++) {
       GetFreqByTokenIdApprox(s, num_bytes, segment_by_shard[s], unit, nullptr, nullptr, &merged);
     }
