@@ -152,23 +152,22 @@ PYBIND11_MODULE(cpp_engine, m) {
       .def_readwrite("cont_cnt", &gram::ProbResult::cont_cnt)
       .def_readwrite("prob", &gram::ProbResult::prob);
 
-  py::class_<gram::DistTokenResult>(m, "DistTokenResult")
-      .def_readwrite("cont_cnt", &gram::DistTokenResult::cont_cnt)
-      .def_readwrite("prob", &gram::DistTokenResult::prob);
-
   py::class_<gram::DistResult<gram::u8>>(m, "DistResult_U8")
       .def_readwrite("prompt_cnt", &gram::DistResult<gram::u8>::prompt_cnt)
-      .def_readwrite("result_by_token_id", &gram::DistResult<gram::u8>::result_by_token_id)
+      .def_readwrite("tokens", &gram::DistResult<gram::u8>::tokens)
+      .def_readwrite("counts", &gram::DistResult<gram::u8>::counts)
       .def_readwrite("approx", &gram::DistResult<gram::u8>::approx);
 
   py::class_<gram::DistResult<gram::u16>>(m, "DistResult_U16")
       .def_readwrite("prompt_cnt", &gram::DistResult<gram::u16>::prompt_cnt)
-      .def_readwrite("result_by_token_id", &gram::DistResult<gram::u16>::result_by_token_id)
+      .def_readwrite("tokens", &gram::DistResult<gram::u16>::tokens)
+      .def_readwrite("counts", &gram::DistResult<gram::u16>::counts)
       .def_readwrite("approx", &gram::DistResult<gram::u16>::approx);
 
   py::class_<gram::DistResult<gram::u32>>(m, "DistResult_U32")
       .def_readwrite("prompt_cnt", &gram::DistResult<gram::u32>::prompt_cnt)
-      .def_readwrite("result_by_token_id", &gram::DistResult<gram::u32>::result_by_token_id)
+      .def_readwrite("tokens", &gram::DistResult<gram::u32>::tokens)
+      .def_readwrite("counts", &gram::DistResult<gram::u32>::counts)
       .def_readwrite("approx", &gram::DistResult<gram::u32>::approx);
 
   py::class_<gram::InfgramProbResult>(m, "InfgramProbResult")
@@ -179,19 +178,22 @@ PYBIND11_MODULE(cpp_engine, m) {
 
   py::class_<gram::InfgramDistResult<gram::u8>>(m, "InfgramDistResult_U8")
       .def_readwrite("prompt_cnt", &gram::InfgramDistResult<gram::u8>::prompt_cnt)
-      .def_readwrite("result_by_token_id", &gram::InfgramDistResult<gram::u8>::result_by_token_id)
+      .def_readwrite("tokens", &gram::InfgramDistResult<gram::u8>::tokens)
+      .def_readwrite("counts", &gram::InfgramDistResult<gram::u8>::counts)
       .def_readwrite("approx", &gram::InfgramDistResult<gram::u8>::approx)
       .def_readwrite("suffix_len", &gram::InfgramDistResult<gram::u8>::suffix_len);
 
   py::class_<gram::InfgramDistResult<gram::u16>>(m, "InfgramDistResult_U16")
       .def_readwrite("prompt_cnt", &gram::InfgramDistResult<gram::u16>::prompt_cnt)
-      .def_readwrite("result_by_token_id", &gram::InfgramDistResult<gram::u16>::result_by_token_id)
+      .def_readwrite("tokens", &gram::InfgramDistResult<gram::u16>::tokens)
+      .def_readwrite("counts", &gram::InfgramDistResult<gram::u16>::counts)
       .def_readwrite("approx", &gram::InfgramDistResult<gram::u16>::approx)
       .def_readwrite("suffix_len", &gram::InfgramDistResult<gram::u16>::suffix_len);
 
   py::class_<gram::InfgramDistResult<gram::u32>>(m, "InfgramDistResult_U32")
       .def_readwrite("prompt_cnt", &gram::InfgramDistResult<gram::u32>::prompt_cnt)
-      .def_readwrite("result_by_token_id", &gram::InfgramDistResult<gram::u32>::result_by_token_id)
+      .def_readwrite("tokens", &gram::InfgramDistResult<gram::u32>::tokens)
+      .def_readwrite("counts", &gram::InfgramDistResult<gram::u32>::counts)
       .def_readwrite("approx", &gram::InfgramDistResult<gram::u32>::approx)
       .def_readwrite("suffix_len", &gram::InfgramDistResult<gram::u32>::suffix_len);
 

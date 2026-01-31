@@ -150,9 +150,9 @@ int main() {
   const auto ntd = engine.PrimitiveNtd(q2, 1000);
   const auto naive_ntd = NaiveNtdCounts(ds, doc_sep, eos, q2, 65535);
   std::uint64_t total = 0;
-  for (const auto& [tok, res] : ntd.result_by_token_id) {
-    total += res.cont_cnt;
-    assert(res.cont_cnt == naive_ntd[tok]);
+  for (std::size_t i = 0; i < ntd.tokens.size(); i++) {
+    total += ntd.counts[i];
+    assert(ntd.counts[i] == naive_ntd[ntd.tokens[i]]);
   }
   assert(total == naive2);
 

@@ -556,7 +556,7 @@ template <typename Token>
 DistResult<Token> Engine<Token>::PrimitiveNtd(const std::vector<Token>& prompt_ids, u64 max_support) const {
   auto fr = Find(prompt_ids);
   if (fr.cnt == 0) {
-    return DistResult<Token>{.prompt_cnt = 0, .result_by_token_id = {}, .approx = false};
+    return DistResult<Token>{.prompt_cnt = 0, .tokens = {}, .counts = {}, .approx = false};
   }
   return NtdFromSegment(prompt_ids.size() * sizeof(Token), fr.segment_by_shard, max_support);
 }
@@ -573,7 +573,7 @@ DistResult<Token> Engine<Token>::NtdFromSegment(std::size_t num_bytes,
     prompt_cnt += seg.second - seg.first;
   }
   if (prompt_cnt == 0) {
-    return DistResult<Token>{.prompt_cnt = 0, .result_by_token_id = {}, .approx = false};
+    return DistResult<Token>{.prompt_cnt = 0, .tokens = {}, .counts = {}, .approx = false};
   }
   u64 unit = 1;
   while (prompt_cnt > unit * max_support) {
@@ -581,40 +581,52 @@ DistResult<Token> Engine<Token>::NtdFromSegment(std::size_t num_bytes,
   }
   const bool approx = (unit > 1);
 
-  std::vector<std::unordered_map<Token, u64>> freq_by_shard(num_shards());
-  for (auto& m : freq_by_shard) {
-    m.reserve(static_cast<std::size_t>(max_support * 2));
-  }
-  if (!pool_.has_value() || num_shards() == 1) {
+  // Skip thread pool for small segments where single-threaded is faster
+  const bool use_pool = pool_.has_value() && num_shards() > 1 && prompt_cnt > 10000;
+  std::unordered_map<Token, u64> merged;
+  merged.reserve(std::min(static_cast<std::size_t>(max_support * 4), static_cast<std::size_t>(20000)));
+
+  if (!use_pool) {
+    // Single-threaded: directly accumulate into merged map
     for (std::size_t s = 0; s < num_shards(); s++) {
-      GetFreqByTokenIdApprox(s, num_bytes, segment_by_shard[s], unit, nullptr, nullptr, &freq_by_shard[s]);
+      GetFreqByTokenIdApprox(s, num_bytes, segment_by_shard[s], unit, nullptr, nullptr, &merged);
     }
   } else {
+    std::vector<std::unordered_map<Token, u64>> freq_by_shard(num_shards());
+    const std::size_t reserve_size = std::min(static_cast<std::size_t>(max_support * 2), static_cast<std::size_t>(10000));
+    for (auto& m : freq_by_shard) {
+      m.reserve(reserve_size);
+    }
     for (std::size_t s = 0; s < num_shards(); s++) {
       pool_->Enqueue([this, s, num_bytes, &segment_by_shard, unit, &freq_by_shard]() {
         GetFreqByTokenIdApprox(s, num_bytes, segment_by_shard[s], unit, nullptr, nullptr, &freq_by_shard[s]);
       });
     }
     pool_->WaitIdle();
-  }
-
-  std::unordered_map<Token, u64> merged;
-  merged.reserve(static_cast<std::size_t>(max_support * 4));
-  for (const auto& m : freq_by_shard) {
-    for (const auto& [tok, cnt] : m) {
-      merged[tok] += cnt;
+    for (const auto& m : freq_by_shard) {
+      for (const auto& [tok, cnt] : m) {
+        merged[tok] += cnt;
+      }
     }
   }
+
   u64 total = 0;
+  std::vector<Token> tokens;
+  std::vector<u64> counts;
+  tokens.reserve(merged.size());
+  counts.reserve(merged.size());
   for (const auto& [tok, cnt] : merged) {
-    (void)tok;
+    tokens.push_back(tok);
+    counts.push_back(cnt);
     total += cnt;
   }
-  std::map<Token, DistTokenResult> result;
-  for (const auto& [tok, cnt] : merged) {
-    result[tok] = DistTokenResult{.cont_cnt = cnt, .prob = static_cast<double>(cnt) / total};
-  }
-  return DistResult<Token>{.prompt_cnt = total, .result_by_token_id = std::move(result), .approx = approx};
+
+  return DistResult<Token>{
+      .prompt_cnt = total,
+      .tokens = std::move(tokens),
+      .counts = std::move(counts),
+      .approx = approx,
+  };
 }
 
 template <typename Token>
@@ -794,7 +806,8 @@ InfgramDistResult<Token> Engine<Token>::Ntd(const std::vector<Token>& prompt_ids
   auto r = PrimitiveNtd(suffix, max_support);
   return InfgramDistResult<Token>{
       .prompt_cnt = r.prompt_cnt,
-      .result_by_token_id = r.result_by_token_id,
+      .tokens = std::move(r.tokens),
+      .counts = std::move(r.counts),
       .approx = r.approx,
       .suffix_len = suffix_len,
   };

@@ -41,15 +41,11 @@ struct ProbResult {
   double prob = -1.0;
 };
 
-struct DistTokenResult {
-  u64 cont_cnt = 0;
-  double prob = 0.0;
-};
-
 template <typename Token>
 struct DistResult {
   u64 prompt_cnt = 0;
-  std::map<Token, DistTokenResult> result_by_token_id;
+  std::vector<Token> tokens;
+  std::vector<u64> counts;
   bool approx = false;
 };
 
@@ -63,7 +59,8 @@ struct InfgramProbResult {
 template <typename Token>
 struct InfgramDistResult {
   u64 prompt_cnt = 0;
-  std::map<Token, DistTokenResult> result_by_token_id;
+  std::vector<Token> tokens;
+  std::vector<u64> counts;
   bool approx = false;
   u64 suffix_len = 0;
 };
