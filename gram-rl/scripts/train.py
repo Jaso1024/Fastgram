@@ -311,23 +311,47 @@ def main() -> int:
                 all_completion_lens.append(len(completion_ids))
                 all_groups.append(prompt_idx)
 
-        # Compute per-group advantages (zero-variance groups get zero advantages)
+        # Compute per-group advantages and filter zero-variance groups (DAPO-style)
         advantages = [0.0] * len(all_rewards)
-        num_zero_var_groups = 0
+        valid_indices = []
 
         for group_idx in range(len(examples)):
             group_mask = [i for i, g in enumerate(all_groups) if g == group_idx]
             group_rewards = [all_rewards[i] for i in group_mask]
 
-            # Check if group has variance
-            if len(set(group_rewards)) <= 1:
-                num_zero_var_groups += 1
-                # Zero variance - advantages stay at 0 (no gradient signal)
-                continue
+            if len(set(group_rewards)) > 1:  # Has variance
+                group_advs = compute_advantages(group_rewards, normalize=True)
+                for i, adv in zip(group_mask, group_advs):
+                    advantages[i] = adv
+                    valid_indices.append(i)
 
-            group_advs = compute_advantages(group_rewards, normalize=True)
-            for i, adv in zip(group_mask, group_advs):
-                advantages[i] = adv
+        # Sync skip decision across all processes (skip only if ALL would skip)
+        has_valid = len(valid_indices) > 0
+        if dist_info.world_size > 1:
+            has_valid_t = torch.tensor([1.0 if has_valid else 0.0], device=device)
+            torch.distributed.all_reduce(has_valid_t)
+            all_skip = has_valid_t.item() == 0  # True only if ALL processes have no valid data
+        else:
+            all_skip = not has_valid
+
+        if all_skip:
+            if is_main:
+                print(f"step {step + 1}/{args.steps} | SKIPPED (all groups zero variance)")
+            continue
+
+        # If this process has no valid data but others do, keep one sample as dummy
+        if not valid_indices:
+            valid_indices = [0]
+            advantages[0] = 0.0  # Zero gradient contribution
+
+        # Filter to valid samples
+        all_sequences = [all_sequences[i] for i in valid_indices]
+        all_prompt_lens = [all_prompt_lens[i] for i in valid_indices]
+        advantages = [advantages[i] for i in valid_indices]
+        all_rewards = [all_rewards[i] for i in valid_indices]
+        all_reward_components = [all_reward_components[i] for i in valid_indices]
+        all_completion_lens = [all_completion_lens[i] for i in valid_indices]
+        all_groups = [all_groups[i] for i in valid_indices]
 
         # Prepare batch
         input_ids, attention_mask, prompt_lens = pad_sequences(
