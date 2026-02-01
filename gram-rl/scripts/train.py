@@ -59,8 +59,6 @@ def parse_args() -> argparse.Namespace:
                    help="Maximum tokens to generate")
     p.add_argument("--lr", type=float, default=5e-6,
                    help="Learning rate")
-    p.add_argument("--max-grad-norm", type=float, default=1.0,
-                   help="Gradient clipping norm (0 to disable)")
     p.add_argument("--update-epochs", type=int, default=1,
                    help="Number of epochs per batch")
 
@@ -313,8 +311,15 @@ def main() -> int:
                 all_completion_lens.append(len(completion_ids))
                 all_groups.append(prompt_idx)
 
-        # Compute advantages
-        advantages = compute_advantages(all_rewards, normalize=True)
+        # Compute per-group advantages (GRPO: normalize within each prompt's completions)
+        advantages = [0.0] * len(all_rewards)
+        for group_idx in range(len(examples)):
+            # Get indices for this group
+            group_mask = [i for i, g in enumerate(all_groups) if g == group_idx]
+            group_rewards = [all_rewards[i] for i in group_mask]
+            group_advs = compute_advantages(group_rewards, normalize=True)
+            for i, adv in zip(group_mask, group_advs):
+                advantages[i] = adv
 
         # Prepare batch
         input_ids, attention_mask, prompt_lens = pad_sequences(
@@ -360,9 +365,6 @@ def main() -> int:
             # Backward pass
             optimizer.zero_grad(set_to_none=True)
             output.loss.backward()
-
-            if args.max_grad_norm > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
             optimizer.step()
 
