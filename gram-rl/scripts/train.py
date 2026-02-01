@@ -311,15 +311,38 @@ def main() -> int:
                 all_completion_lens.append(len(completion_ids))
                 all_groups.append(prompt_idx)
 
-        # Compute per-group advantages (GRPO: normalize within each prompt's completions)
+        # Compute per-group advantages and filter zero-variance groups (DAPO-style)
         advantages = [0.0] * len(all_rewards)
+        valid_indices = []
+
         for group_idx in range(len(examples)):
-            # Get indices for this group
             group_mask = [i for i, g in enumerate(all_groups) if g == group_idx]
             group_rewards = [all_rewards[i] for i in group_mask]
+
+            # Check if group has variance
+            if len(set(group_rewards)) <= 1:
+                # Zero variance - skip this group
+                continue
+
             group_advs = compute_advantages(group_rewards, normalize=True)
             for i, adv in zip(group_mask, group_advs):
                 advantages[i] = adv
+                valid_indices.append(i)
+
+        # Skip step if no valid groups
+        if not valid_indices:
+            if is_main:
+                print(f"step {step + 1}/{args.steps} | SKIPPED (all groups zero variance)")
+            continue
+
+        # Filter to only valid samples
+        all_sequences = [all_sequences[i] for i in valid_indices]
+        all_prompt_lens = [all_prompt_lens[i] for i in valid_indices]
+        advantages = [advantages[i] for i in valid_indices]
+        all_rewards = [all_rewards[i] for i in valid_indices]
+        all_reward_components = [all_reward_components[i] for i in valid_indices]
+        all_completion_lens = [all_completion_lens[i] for i in valid_indices]
+        all_groups = [all_groups[i] for i in valid_indices]
 
         # Prepare batch
         input_ids, attention_mask, prompt_lens = pad_sequences(
