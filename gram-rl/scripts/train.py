@@ -282,14 +282,16 @@ def main() -> int:
             prompt_ids = model.tokenizer.encode(prompt_text, add_special_tokens=False)
             prompt_len = len(prompt_ids)
 
-            for _ in range(args.group_size):
-                # Generate
-                input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=device)
-                gen_config.seed = random.randint(0, 2**31)
-                output = model.generate(input_ids, config=gen_config)
+            # Batch generation: create batch of identical prompts
+            batch_input = torch.tensor(
+                [prompt_ids] * args.group_size, dtype=torch.long, device=device
+            )
+            gen_config.seed = random.randint(0, 2**31)
+            output = model.generate(batch_input, config=gen_config)
 
-                # Extract completion
-                full_seq = output.sequences[0].tolist()
+            # Process all completions from batch
+            for seq_idx in range(args.group_size):
+                full_seq = output.sequences[seq_idx].tolist()
                 completion_ids = full_seq[prompt_len:]
                 completion_text = model.tokenizer.decode(
                     completion_ids, skip_special_tokens=True
