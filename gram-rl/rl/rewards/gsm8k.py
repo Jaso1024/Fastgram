@@ -180,7 +180,7 @@ def gsm8k_prompt(question: str) -> str:
 def gsm8k_format_instruction(style: str) -> str:
     """Get format instruction for a given style."""
     if style == "hash4":
-        return "Give the final answer on its own line as: #### <number>"
+        return "Be concise. Give the final answer on its own line as: #### <number>"
     if style == "cot":
         return "Think through this step by step, showing your reasoning. Then give the final answer as: #### <number>"
     if style == "deepseek":
